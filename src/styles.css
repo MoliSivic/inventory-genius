@@ -153,6 +153,13 @@
     background-color: var(--color-background);
     color: var(--color-foreground);
   }
+
+  /* Always show number input spinner arrows */
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
+    opacity: 1;
+    height: auto;
+  }
 }
 
 @layer utilities {

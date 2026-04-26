@@ -3,6 +3,12 @@ import { useMemo, useState } from "react";
 import { Plus, Trash2, Send, Printer, Download, Search, X, ShoppingCart, FileText } from "lucide-react";
 import { useStore, fmtMoney, suggestedPrice } from "@/lib/store";
 import { normalizeCategories } from "@/lib/categories";
+import {
+  getProductSaleUnitOptions,
+  convertStockUnitPriceToSaleUnitPrice,
+  convertSaleQuantityToStockQuantity,
+} from "@/lib/sale-units";
+import { primaryUnit } from "@/lib/units";
 import { PageHeader, PageSection, StatusBadge } from "@/components/app/StatCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,11 +18,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Receipt } from "@/components/app/Receipt";
 import { toast } from "sonner";
-import type { PaymentStatus, Sale } from "@/lib/types";
+import type { PaymentStatus, Sale, UnitType } from "@/lib/types";
 
 export const Route = createFileRoute("/sales")({ component: SalesPage });
 
-interface Row { category: string; productId: string; quantity: number; unitPrice: number; }
+interface Row { category: string; productId: string; saleUnit?: UnitType; quantity: number; unitPrice: number; }
 
 const ALL = "all";
 
@@ -28,7 +34,7 @@ function SalesPage() {
   const [marketFilter, setMarketFilter] = useState("all");
   const [customerId, setCustomerId] = useState("");
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
-  const [rows, setRows] = useState<Row[]>([{ category: ALL, productId: "", quantity: 1, unitPrice: 0 }]);
+  const [rows, setRows] = useState<Row[]>([{ category: ALL, productId: "", quantity: 0, unitPrice: 0 }]);
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>("paid");
   const [paidAmount, setPaidAmount] = useState(0);
   const [notes, setNotes] = useState("");
@@ -99,24 +105,34 @@ function SalesPage() {
   const total = useMemo(() => rows.reduce((a, r) => a + r.quantity * r.unitPrice, 0), [rows]);
   const estProfit = useMemo(() => rows.reduce((a, r) => {
     const p = state.products.find((x) => x.id === r.productId);
-    return a + (p ? (r.unitPrice - p.avgCost) * r.quantity : 0);
+    if (!p) return a;
+    // Convert avgCost to sale-unit cost for proper profit calculation
+    const costPerSaleUnit = convertStockUnitPriceToSaleUnitPrice(p, p.avgCost, r.saleUnit);
+    return a + (r.unitPrice - costPerSaleUnit) * r.quantity;
   }, 0), [rows, state.products]);
 
   const updateRow = (i: number, patch: Partial<Row>) => {
     setRows((rs) => rs.map((r, idx) => {
       if (idx !== i) return r;
       const next = { ...r, ...patch };
-      // when product changes, suggest price
-      if (patch.productId && customerId) {
-        const sug = suggestedPrice(state, customerId, patch.productId);
-        if (sug !== undefined) next.unitPrice = sug;
+      // when product changes, set default unit and suggest price
+      if (patch.productId) {
+        const product = state.products.find((x) => x.id === patch.productId);
+        if (product) {
+          const unitOptions = getProductSaleUnitOptions(product);
+          next.saleUnit = unitOptions[0].unit; // default to stock unit
+        }
+        if (customerId) {
+          const sug = suggestedPrice(state, customerId, patch.productId, next.saleUnit);
+          if (sug !== undefined) next.unitPrice = sug;
+        }
       }
       return next;
     }));
   };
   const addRow = () => setRows((prev) => [
     ...prev,
-    { category: prev.at(-1)?.category ?? ALL, productId: "", quantity: 1, unitPrice: 0 },
+    { category: prev.at(-1)?.category ?? ALL, productId: "", quantity: 0, unitPrice: 0 },
   ]);
   const removeRow = (i: number) => setRows(rows.filter((_, idx) => idx !== i));
 
@@ -125,7 +141,7 @@ function SalesPage() {
     setCustomerId(id);
     setRows((rs) => rs.map((r) => {
       if (!r.productId) return r;
-      const sug = suggestedPrice(state, id, r.productId);
+      const sug = suggestedPrice(state, id, r.productId, r.saleUnit);
       return sug !== undefined ? { ...r, unitPrice: sug } : r;
     }));
   };
@@ -141,12 +157,16 @@ function SalesPage() {
     if (!customerId) { toast.error("Select a customer"); return; }
     if (rows.some((r) => !r.productId || r.quantity <= 0 || r.unitPrice < 0)) { toast.error("Check item rows"); return; }
     const finalPaid = paymentStatus === "paid" ? total : paymentStatus === "unpaid" ? 0 : paidAmount;
-    const result = addSale({ customerId, date, items: rows, paidAmount: finalPaid, paymentStatus, notes: notes || undefined });
+    const result = addSale({
+      customerId, date,
+      items: rows.map((r) => ({ productId: r.productId, quantity: r.quantity, unit: r.saleUnit, unitPrice: r.unitPrice })),
+      paidAmount: finalPaid, paymentStatus, notes: notes || undefined,
+    });
     if ("error" in result) { toast.error(result.error); return; }
     toast.success(`Sale recorded — ${result.receiptNumber}`);
     setGenerated(result);
     // reset
-    setRows([{ category: ALL, productId: "", quantity: 1, unitPrice: 0 }]);
+    setRows([{ category: ALL, productId: "", quantity: 0, unitPrice: 0 }]);
     setNotes(""); setPaidAmount(0); setPaymentStatus("paid");
   };
 
@@ -213,8 +233,8 @@ function SalesPage() {
                 <th className="px-5 py-2 font-medium">Product</th>
                 <th className="px-5 py-2 font-medium w-20">Stock</th>
                 <th className="px-5 py-2 font-medium w-20">Cost</th>
-                <th className="px-5 py-2 font-medium w-20">Qty</th>
-                <th className="px-5 py-2 font-medium w-20">Unit</th>
+                <th className="px-5 py-2 font-medium w-28">Qty</th>
+                <th className="px-5 py-2 font-medium w-24">Unit</th>
                 <th className="px-5 py-2 font-medium w-28">Price</th>
                 <th className="px-5 py-2 font-medium text-right w-28">Subtotal</th>
                 <th className="px-5 py-2 w-12"></th>
@@ -226,7 +246,10 @@ function SalesPage() {
                   (pp) => r.category === ALL || pp.category === r.category,
                 );
                 const p = state.products.find((x) => x.id === r.productId);
-                const sug = customerId && r.productId ? suggestedPrice(state, customerId, r.productId) : undefined;
+                const unitOptions = p ? getProductSaleUnitOptions(p) : [];
+                const hasMultipleUnits = unitOptions.length > 1;
+                const sug = customerId && r.productId ? suggestedPrice(state, customerId, r.productId, r.saleUnit) : undefined;
+                const costPerUnit = p ? convertStockUnitPriceToSaleUnitPrice(p, p.avgCost, r.saleUnit) : 0;
                 return (
                   <tr key={i} className="border-b border-border/60 last:border-0">
                     <td className="px-5 py-3 text-xs font-medium text-muted-foreground">{i + 1}</td>
@@ -238,7 +261,7 @@ function SalesPage() {
                             if (idx !== i) return row;
                             const currentProduct = state.products.find((pp) => pp.id === row.productId);
                             const keepProduct = currentProduct && (v === ALL || currentProduct.category === v);
-                            return { ...row, category: v, productId: keepProduct ? row.productId : "", unitPrice: keepProduct ? row.unitPrice : 0 };
+                            return { ...row, category: v, productId: keepProduct ? row.productId : "", saleUnit: keepProduct ? row.saleUnit : undefined, unitPrice: keepProduct ? row.unitPrice : 0 };
                           }));
                         }}
                       >
@@ -255,10 +278,34 @@ function SalesPage() {
                         <SelectContent>{productOptions.map((pp) => <SelectItem key={pp.id} value={pp.id}>{pp.name}</SelectItem>)}</SelectContent>
                       </Select>
                     </td>
-                    <td className="px-5 py-3 text-xs">{p ? `${p.stock} ${p.unit}` : "—"}</td>
-                    <td className="px-5 py-3 text-xs">{p ? fmtMoney(p.avgCost) : "—"}</td>
-                    <td className="px-5 py-3"><Input type="number" min={1} value={r.quantity} onChange={(e) => updateRow(i, { quantity: Number(e.target.value) })} /></td>
-                    <td className="px-5 py-3 text-xs font-medium">{p ? (Array.isArray(p.unit) ? p.unit[0] : p.unit) : "—"}</td>
+                    <td className="px-5 py-3 text-xs">{p ? `${p.stock} ${primaryUnit(p.unit)}` : "—"}</td>
+                    <td className="px-5 py-3 text-xs">{p ? fmtMoney(costPerUnit) : "—"}</td>
+                    <td className="px-5 py-3"><Input type="number" min={0} value={r.quantity} onChange={(e) => updateRow(i, { quantity: Number(e.target.value) })} /></td>
+                    <td className="px-5 py-3">
+                      {hasMultipleUnits ? (
+                        <Select
+                          value={r.saleUnit ?? primaryUnit(p!.unit)}
+                          onValueChange={(v) => {
+                            const newUnit = v as UnitType;
+                            setRows((rs) => rs.map((row, idx) => {
+                              if (idx !== i) return row;
+                              // Try to get suggested price for new unit
+                              const newSug = customerId ? suggestedPrice(state, customerId, row.productId, newUnit) : undefined;
+                              return { ...row, saleUnit: newUnit, unitPrice: newSug ?? row.unitPrice };
+                            }));
+                          }}
+                        >
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {unitOptions.map((opt) => (
+                              <SelectItem key={opt.unit} value={opt.unit}>{opt.unit}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <span className="text-xs font-medium">{p ? primaryUnit(p.unit) : "—"}</span>
+                      )}
+                    </td>
                     <td className="px-5 py-3">
                       <Input type="number" step="0.01" min={0} value={r.unitPrice} onChange={(e) => updateRow(i, { unitPrice: Number(e.target.value) })} />
                       {sug !== undefined && <p className="text-[10px] text-muted-foreground mt-0.5">Usual: {fmtMoney(sug)}</p>}
