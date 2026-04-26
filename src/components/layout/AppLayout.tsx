@@ -10,7 +10,6 @@ import {
   Tag,
   TrendingUp,
   Wallet,
-  Receipt,
   FileDown,
   Settings,
   Menu,
@@ -31,7 +30,6 @@ const nav: NavItem[] = [
   { to: "/customer-prices", label: "Customer Prices", icon: Tag },
   { to: "/reports", label: "Profit Reports", icon: TrendingUp },
   { to: "/debts", label: "Debt Tracking", icon: Wallet },
-  { to: "/receipts", label: "Receipts", icon: Receipt },
   { to: "/exports", label: "Exports", icon: FileDown },
   { to: "/settings", label: "Settings", icon: Settings },
 ];

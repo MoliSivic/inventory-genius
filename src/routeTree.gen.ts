@@ -13,7 +13,6 @@ import { Route as StockInRouteImport } from './routes/stock-in'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SalesRouteImport } from './routes/sales'
 import { Route as ReportsRouteImport } from './routes/reports'
-import { Route as ReceiptsRouteImport } from './routes/receipts'
 import { Route as ProductsRouteImport } from './routes/products'
 import { Route as FactoriesRouteImport } from './routes/factories'
 import { Route as ExportsRouteImport } from './routes/exports'
@@ -40,11 +39,6 @@ const SalesRoute = SalesRouteImport.update({
 const ReportsRoute = ReportsRouteImport.update({
   id: '/reports',
   path: '/reports',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ReceiptsRoute = ReceiptsRouteImport.update({
-  id: '/receipts',
-  path: '/receipts',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ProductsRoute = ProductsRouteImport.update({
@@ -91,7 +85,6 @@ export interface FileRoutesByFullPath {
   '/exports': typeof ExportsRoute
   '/factories': typeof FactoriesRoute
   '/products': typeof ProductsRoute
-  '/receipts': typeof ReceiptsRoute
   '/reports': typeof ReportsRoute
   '/sales': typeof SalesRoute
   '/settings': typeof SettingsRoute
@@ -105,7 +98,6 @@ export interface FileRoutesByTo {
   '/exports': typeof ExportsRoute
   '/factories': typeof FactoriesRoute
   '/products': typeof ProductsRoute
-  '/receipts': typeof ReceiptsRoute
   '/reports': typeof ReportsRoute
   '/sales': typeof SalesRoute
   '/settings': typeof SettingsRoute
@@ -120,7 +112,6 @@ export interface FileRoutesById {
   '/exports': typeof ExportsRoute
   '/factories': typeof FactoriesRoute
   '/products': typeof ProductsRoute
-  '/receipts': typeof ReceiptsRoute
   '/reports': typeof ReportsRoute
   '/sales': typeof SalesRoute
   '/settings': typeof SettingsRoute
@@ -136,7 +127,6 @@ export interface FileRouteTypes {
     | '/exports'
     | '/factories'
     | '/products'
-    | '/receipts'
     | '/reports'
     | '/sales'
     | '/settings'
@@ -150,7 +140,6 @@ export interface FileRouteTypes {
     | '/exports'
     | '/factories'
     | '/products'
-    | '/receipts'
     | '/reports'
     | '/sales'
     | '/settings'
@@ -164,7 +153,6 @@ export interface FileRouteTypes {
     | '/exports'
     | '/factories'
     | '/products'
-    | '/receipts'
     | '/reports'
     | '/sales'
     | '/settings'
@@ -179,7 +167,6 @@ export interface RootRouteChildren {
   ExportsRoute: typeof ExportsRoute
   FactoriesRoute: typeof FactoriesRoute
   ProductsRoute: typeof ProductsRoute
-  ReceiptsRoute: typeof ReceiptsRoute
   ReportsRoute: typeof ReportsRoute
   SalesRoute: typeof SalesRoute
   SettingsRoute: typeof SettingsRoute
@@ -214,13 +201,6 @@ declare module '@tanstack/react-router' {
       path: '/reports'
       fullPath: '/reports'
       preLoaderRoute: typeof ReportsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/receipts': {
-      id: '/receipts'
-      path: '/receipts'
-      fullPath: '/receipts'
-      preLoaderRoute: typeof ReceiptsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/products': {
@@ -283,7 +263,6 @@ const rootRouteChildren: RootRouteChildren = {
   ExportsRoute: ExportsRoute,
   FactoriesRoute: FactoriesRoute,
   ProductsRoute: ProductsRoute,
-  ReceiptsRoute: ReceiptsRoute,
   ReportsRoute: ReportsRoute,
   SalesRoute: SalesRoute,
   SettingsRoute: SettingsRoute,
