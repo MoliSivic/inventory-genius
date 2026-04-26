@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
+import { usePersistedState } from "@/hooks/usePersistedState";
 import { Plus, Trash2, Send, Printer, Download, Search, X, ShoppingCart, FileText } from "lucide-react";
 import { useStore, fmtMoney, suggestedPrice } from "@/lib/store";
 import { normalizeCategories } from "@/lib/categories";
@@ -30,12 +31,12 @@ type ViewMode = "sale" | "receipt";
 
 function SalesPage() {
   const { state, addSale, updateSaleTelegram } = useStore();
-  const [viewMode, setViewMode] = useState<ViewMode>("sale");
-  const [marketFilter, setMarketFilter] = useState("all");
+  const [viewMode, setViewMode] = usePersistedState<ViewMode>("sales_viewMode", "sale");
+  const [marketFilter, setMarketFilter] = usePersistedState("sales_marketFilter", "all");
   const [customerId, setCustomerId] = useState("");
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [rows, setRows] = useState<Row[]>([{ category: ALL, productId: "", quantity: 0, unitPrice: 0 }]);
-  const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>("paid");
+  const [paymentStatus, setPaymentStatus] = usePersistedState<PaymentStatus>("sales_paymentStatus", "paid");
   const [paidAmount, setPaidAmount] = useState(0);
   const [notes, setNotes] = useState("");
   const [generated, setGenerated] = useState<Sale | null>(null);
@@ -48,13 +49,13 @@ function SalesPage() {
   );
 
   // Recent sales filters
-  const [rsSearch, setRsSearch] = useState("");
-  const [rsMarket, setRsMarket] = useState("all");
-  const [rsCustomer, setRsCustomer] = useState("all");
-  const [rsStatus, setRsStatus] = useState<"all" | PaymentStatus>("all");
-  const [rsSort, setRsSort] = useState<"latest" | "oldest" | "highest" | "lowest" | "profit">("latest");
-  const [rsFrom, setRsFrom] = useState("");
-  const [rsTo, setRsTo] = useState("");
+  const [rsSearch, setRsSearch] = usePersistedState("sales_rsSearch", "");
+  const [rsMarket, setRsMarket] = usePersistedState("sales_rsMarket", "all");
+  const [rsCustomer, setRsCustomer] = usePersistedState("sales_rsCustomer", "all");
+  const [rsStatus, setRsStatus] = usePersistedState<"all" | PaymentStatus>("sales_rsStatus", "all");
+  const [rsSort, setRsSort] = usePersistedState<"latest" | "oldest" | "highest" | "lowest" | "profit">("sales_rsSort", "latest");
+  const [rsFrom, setRsFrom] = usePersistedState("sales_rsFrom", "");
+  const [rsTo, setRsTo] = usePersistedState("sales_rsTo", "");
 
   const recentSales = useMemo(() => {
     const customerById = new Map(state.customers.map((c) => [c.id, c]));
