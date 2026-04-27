@@ -1,13 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { usePersistedState } from "@/hooks/usePersistedState";
-import { Plus, Trash2, Send, Printer, Download, Search, X, ShoppingCart, FileText } from "lucide-react";
+import { Plus, Trash2, Send, Printer, Download, Search, X, Pencil } from "lucide-react";
 import { useStore, fmtMoney, suggestedPrice } from "@/lib/store";
 import { normalizeCategories } from "@/lib/categories";
 import {
   getProductSaleUnitOptions,
   convertStockUnitPriceToSaleUnitPrice,
-  convertSaleQuantityToStockQuantity,
+  convertStockQuantityToSaleQuantity,
 } from "@/lib/sale-units";
 import { primaryUnit } from "@/lib/units";
 import { PageHeader, PageSection, StatusBadge } from "@/components/app/StatCard";
@@ -30,7 +30,7 @@ const ALL = "all";
 type ViewMode = "sale" | "receipt";
 
 function SalesPage() {
-  const { state, addSale, updateSaleTelegram } = useStore();
+  const { state, addSale, updateSale, updateSaleTelegram } = useStore();
   const [viewMode, setViewMode] = usePersistedState<ViewMode>("sales_viewMode", "sale");
   const [marketFilter, setMarketFilter] = usePersistedState("sales_marketFilter", "all");
   const [customerId, setCustomerId] = useState("");
@@ -40,6 +40,7 @@ function SalesPage() {
   const [paidAmount, setPaidAmount] = useState(0);
   const [notes, setNotes] = useState("");
   const [generated, setGenerated] = useState<Sale | null>(null);
+  const [editingSaleId, setEditingSaleId] = useState<string | null>(null);
 
   const markets = useMemo(() => Array.from(new Set(state.customers.map((c) => c.market))), [state.customers]);
   const filteredCustomers = state.customers.filter((c) => marketFilter === "all" || c.market === marketFilter);
@@ -154,21 +155,82 @@ function SalesPage() {
     else if (s === "unpaid") setPaidAmount(0);
   };
 
+  const resetSaleForm = () => {
+    setRows([{ category: ALL, productId: "", quantity: 0, unitPrice: 0 }]);
+    setNotes("");
+    setPaidAmount(0);
+    setPaymentStatus("paid");
+    setEditingSaleId(null);
+  };
+
+  const startEditInSaleMode = (sale: Sale) => {
+    const customerForSale = state.customers.find((c) => c.id === sale.customerId);
+    if (customerForSale) {
+      setMarketFilter(customerForSale.market);
+    }
+
+    const saleRows: Row[] = sale.items.map((item) => {
+      const product = state.products.find((p) => p.id === item.productId);
+      return {
+        category: product?.category ?? ALL,
+        productId: item.productId,
+        saleUnit: item.unit,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+      };
+    });
+
+    setCustomerId(sale.customerId);
+    setDate(sale.date);
+    setRows(saleRows.length > 0 ? saleRows : [{ category: ALL, productId: "", quantity: 0, unitPrice: 0 }]);
+    setPaymentStatus(sale.paymentStatus);
+    setPaidAmount(sale.paidAmount);
+    setNotes(sale.notes ?? "");
+    setEditingSaleId(sale.id);
+    setGenerated(null);
+    setViewMode("sale");
+  };
+
+  const editingSale = editingSaleId
+    ? state.sales.find((sale) => sale.id === editingSaleId) ?? null
+    : null;
+
   const submit = () => {
     if (!customerId) { toast.error("Select a customer"); return; }
     if (rows.some((r) => !r.productId || r.quantity <= 0 || r.unitPrice < 0)) { toast.error("Check item rows"); return; }
     const finalPaid = paymentStatus === "paid" ? total : paymentStatus === "unpaid" ? 0 : paidAmount;
-    const result = addSale({
-      customerId, date,
-      items: rows.map((r) => ({ productId: r.productId, quantity: r.quantity, unit: r.saleUnit, unitPrice: r.unitPrice })),
-      paidAmount: finalPaid, paymentStatus, notes: notes || undefined,
-    });
+    const clampedPaid = Number(Math.min(Math.max(finalPaid, 0), total).toFixed(2));
+    const normalizedPaymentStatus: PaymentStatus =
+      clampedPaid <= 0 ? "unpaid" : clampedPaid >= total ? "paid" : "partial";
+
+    const payload = {
+      customerId,
+      date,
+      items: rows.map((r) => ({
+        productId: r.productId,
+        quantity: r.quantity,
+        unit: r.saleUnit,
+        unitPrice: r.unitPrice,
+      })),
+      paidAmount: clampedPaid,
+      paymentStatus: normalizedPaymentStatus,
+      notes: notes || undefined,
+    };
+
+    if (editingSaleId) {
+      const result = updateSale(editingSaleId, payload);
+      if ("error" in result) { toast.error(result.error); return; }
+      toast.success(`Sale updated — ${result.receiptNumber}`);
+      setGenerated(result);
+      resetSaleForm();
+      return;
+    }
+
+    const result = addSale(payload);
     if ("error" in result) { toast.error(result.error); return; }
     toast.success(`Sale recorded — ${result.receiptNumber}`);
     setGenerated(result);
-    // reset
-    setRows([{ category: ALL, productId: "", quantity: 0, unitPrice: 0 }]);
-    setNotes(""); setPaidAmount(0); setPaymentStatus("paid");
+    resetSaleForm();
   };
 
   const customer = state.customers.find((c) => c.id === customerId);
@@ -184,21 +246,34 @@ function SalesPage() {
               variant={viewMode === "sale" ? "default" : "outline"}
               onClick={() => setViewMode("sale")}
             >
-              <ShoppingCart className="h-4 w-4 mr-1" />
               Sale Mode
             </Button>
             <Button
               variant={viewMode === "receipt" ? "default" : "outline"}
               onClick={() => setViewMode("receipt")}
             >
-              <FileText className="h-4 w-4 mr-1" />
               View Receipt
             </Button>
           </div>
         }
       />
 
-      {viewMode === "sale" && <PageSection title="New Sale">
+      {viewMode === "sale" && (
+      <PageSection
+        title={editingSale ? "Edit Sale Receipt" : "New Sale"}
+        description={
+          editingSale
+            ? `Update receipt ${editingSale.receiptNumber} items, payment, or notes, then save your changes.`
+            : undefined
+        }
+        actions={
+          editingSale ? (
+            <Button variant="outline" onClick={resetSaleForm}>
+              Cancel Edit
+            </Button>
+          ) : undefined
+        }
+      >
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
           <div>
             <Label>Filter by Market</Label>
@@ -225,14 +300,14 @@ function SalesPage() {
           </div>
         </div>
 
-        <div className="overflow-x-auto -mx-5">
+        <div className="overflow-x-auto -mx-5 pt-2 pb-3">
           <table className="w-full text-sm min-w-[1000px]">
             <thead>
               <tr className="text-left text-xs uppercase text-muted-foreground border-b border-border">
                 <th className="px-5 py-2 font-medium w-12">No.</th>
                 <th className="px-5 py-2 font-medium w-40">Category</th>
-                <th className="px-5 py-2 font-medium">Product</th>
-                <th className="px-5 py-2 font-medium w-20">Stock</th>
+                <th className="px-5 py-2 font-medium w-[340px]">Product</th>
+                <th className="px-5 py-2 font-medium w-36">Stock</th>
                 <th className="px-5 py-2 font-medium w-20">Cost</th>
                 <th className="px-5 py-2 font-medium w-28">Qty</th>
                 <th className="px-5 py-2 font-medium w-24">Unit</th>
@@ -249,6 +324,14 @@ function SalesPage() {
                 const p = state.products.find((x) => x.id === r.productId);
                 const unitOptions = p ? getProductSaleUnitOptions(p) : [];
                 const hasMultipleUnits = unitOptions.length > 1;
+                const stockUnit = p ? primaryUnit(p.unit) : undefined;
+                const stockSubUnitTotals =
+                  p && unitOptions.length > 1
+                    ? unitOptions.slice(1).map((unitOption) => ({
+                        unit: unitOption.unit,
+                        quantity: convertStockQuantityToSaleQuantity(p, p.stock, unitOption.unit),
+                      }))
+                    : [];
                 const sug = customerId && r.productId ? suggestedPrice(state, customerId, r.productId, r.saleUnit) : undefined;
                 const costPerUnit = p ? convertStockUnitPriceToSaleUnitPrice(p, p.avgCost, r.saleUnit) : 0;
                 return (
@@ -275,11 +358,24 @@ function SalesPage() {
                     </td>
                     <td className="px-5 py-3">
                       <Select value={r.productId} onValueChange={(v) => updateRow(i, { productId: v })}>
-                        <SelectTrigger><SelectValue placeholder="Select product" /></SelectTrigger>
+                        <SelectTrigger className="w-[320px] max-w-full"><SelectValue placeholder="Select product" /></SelectTrigger>
                         <SelectContent>{productOptions.map((pp) => <SelectItem key={pp.id} value={pp.id}>{pp.name}</SelectItem>)}</SelectContent>
                       </Select>
                     </td>
-                    <td className="px-5 py-3 text-xs">{p ? `${p.stock} ${primaryUnit(p.unit)}` : "—"}</td>
+                    <td className="px-5 py-3 text-xs">
+                      {p ? (
+                        <>
+                          <p className="font-medium">{p.stock} {stockUnit}</p>
+                          {stockSubUnitTotals.map((subUnitTotal, subUnitIndex) => (
+                            <p key={`${subUnitTotal.unit}-${subUnitIndex}`} className="text-[10px] text-muted-foreground whitespace-nowrap">
+                              ({subUnitTotal.quantity} {subUnitTotal.unit})
+                            </p>
+                          ))}
+                        </>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
                     <td className="px-5 py-3 text-xs">{p ? fmtMoney(costPerUnit) : "—"}</td>
                     <td className="px-5 py-3"><Input type="number" min={0} value={r.quantity} onChange={(e) => updateRow(i, { quantity: Number(e.target.value) })} /></td>
                     <td className="px-5 py-3">
@@ -330,11 +426,11 @@ function SalesPage() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
-          <div className="rounded-lg border border-border p-3 bg-muted/30">
+          <div className="p-1">
             <p className="text-xs text-muted-foreground">Total Sale</p>
             <p className="text-xl font-bold">{fmtMoney(total)}</p>
           </div>
-          <div className="rounded-lg border border-success/30 p-3 bg-success/5">
+          <div className="p-1">
             <p className="text-xs text-muted-foreground">Estimated Profit</p>
             <p className="text-xl font-bold text-success">{fmtMoney(estProfit)}</p>
             <p className="text-[10px] text-muted-foreground">Based on weighted avg cost</p>
@@ -361,11 +457,24 @@ function SalesPage() {
         </div>
 
         <div className="mt-4 flex justify-end">
-          <Button onClick={submit} size="lg">Save Sale & Generate Receipt</Button>
+          <Button onClick={submit} size="lg">
+            {editingSale ? "Update Sale & Generate Receipt" : "Save Sale & Generate Receipt"}
+          </Button>
         </div>
-      </PageSection>}
+      </PageSection>
+      )}
 
-      <ReceiptDialog sale={generated} onClose={() => setGenerated(null)} onShare={(status) => { if (generated) { updateSaleTelegram(generated.id, status); toast.success("Receipt is ready to share through Telegram."); } }} />
+      <ReceiptDialog
+        sale={generated}
+        onClose={() => setGenerated(null)}
+        onEditInSaleMode={startEditInSaleMode}
+        onShare={(status) => {
+          if (generated) {
+            updateSaleTelegram(generated.id, status);
+            toast.success("Receipt is ready to share through Telegram.");
+          }
+        }}
+      />
 
       {viewMode === "receipt" && <PageSection title="Recent Sales">
           <div className="flex flex-col sm:flex-row gap-3 mb-4">
@@ -459,7 +568,17 @@ function SalesPage() {
   );
 }
 
-function ReceiptDialog({ sale, onClose, onShare }: { sale: Sale | null; onClose: () => void; onShare: (status: "customer" | "owner" | "both") => void }) {
+function ReceiptDialog({
+  sale,
+  onClose,
+  onShare,
+  onEditInSaleMode,
+}: {
+  sale: Sale | null;
+  onClose: () => void;
+  onShare: (status: "customer" | "owner" | "both") => void;
+  onEditInSaleMode: (sale: Sale) => void;
+}) {
   const { state } = useStore();
   if (!sale) return null;
   const customer = state.customers.find((c) => c.id === sale.customerId);
@@ -492,6 +611,10 @@ function ReceiptDialog({ sale, onClose, onShare }: { sale: Sale | null; onClose:
         <DialogHeader><DialogTitle>Receipt</DialogTitle></DialogHeader>
         <Receipt sale={sale} customer={customer} products={state.products} shopName={state.shopName} />
         <DialogFooter className="flex-wrap gap-2">
+          <Button variant="outline" size="sm" onClick={() => onEditInSaleMode(sale)}>
+            <Pencil className="h-4 w-4 mr-1" />
+            Edit in Sale Mode
+          </Button>
           <Button variant="outline" size="sm" onClick={handlePrint}><Printer className="h-4 w-4 mr-1" />Print</Button>
           <Button variant="outline" size="sm" onClick={handleDownload}><Download className="h-4 w-4 mr-1" />Download</Button>
           <Button size="sm" onClick={() => onShare("customer")}><Send className="h-4 w-4 mr-1" />Send to Customer</Button>

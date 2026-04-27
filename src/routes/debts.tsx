@@ -1,10 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useStore, fmtMoney, customerTotals } from "@/lib/store";
 import { PageHeader, PageSection, StatusBadge } from "@/components/app/StatCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { displayZeroAsPlaceholder, parseNumericInput } from "@/lib/utils";
 import { toast } from "sonner";
@@ -16,12 +17,81 @@ function DebtsPage() {
   const { state, recordPayment } = useStore();
   const [paying, setPaying] = useState<Sale | null>(null);
   const [amount, setAmount] = useState(0);
+  const [marketFilter, setMarketFilter] = useState("all");
+  const [customerFilter, setCustomerFilter] = useState("all");
+
+  const customerById = useMemo(
+    () => new Map(state.customers.map((customer) => [customer.id, customer])),
+    [state.customers],
+  );
+  const markets = useMemo(
+    () => Array.from(new Set(state.customers.map((customer) => customer.market))).sort(),
+    [state.customers],
+  );
+  const customerOptions = useMemo(
+    () => state.customers.filter((customer) => marketFilter === "all" || customer.market === marketFilter),
+    [state.customers, marketFilter],
+  );
+
+  useEffect(() => {
+    if (customerFilter === "all") return;
+    const selectedCustomer = customerById.get(customerFilter);
+    if (!selectedCustomer || (marketFilter !== "all" && selectedCustomer.market !== marketFilter)) {
+      setCustomerFilter("all");
+    }
+  }, [customerFilter, customerById, marketFilter]);
 
   const unpaid = state.sales.filter((s) => s.paymentStatus !== "paid");
+  const filteredUnpaid = unpaid.filter((sale) => {
+    const customer = customerById.get(sale.customerId);
+    const matchesMarket = marketFilter === "all" || customer?.market === marketFilter;
+    const matchesCustomer = customerFilter === "all" || sale.customerId === customerFilter;
+    return matchesMarket && matchesCustomer;
+  });
+  const customersWithDebt = state.customers.filter((customer) => {
+    if (marketFilter !== "all" && customer.market !== marketFilter) return false;
+    if (customerFilter !== "all" && customer.id !== customerFilter) return false;
+    return customerTotals(state, customer.id).debt > 0;
+  });
 
   return (
     <div>
       <PageHeader title="Debt Tracking" description="Outstanding balances by customer and sale." />
+
+      <div className="mb-4 grid gap-3 sm:grid-cols-2 sm:max-w-2xl">
+        <div>
+          <Label>Filter by Market</Label>
+          <Select value={marketFilter} onValueChange={setMarketFilter}>
+            <SelectTrigger>
+              <SelectValue placeholder="Select market" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All markets</SelectItem>
+              {markets.map((market) => (
+                <SelectItem key={market} value={market}>
+                  {market}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <Label>Filter by Customer</Label>
+          <Select value={customerFilter} onValueChange={setCustomerFilter}>
+            <SelectTrigger>
+              <SelectValue placeholder="Select customer" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All customers</SelectItem>
+              {customerOptions.map((customer) => (
+                <SelectItem key={customer.id} value={customer.id}>
+                  {customer.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
 
       <PageSection title="Customers with Debt">
         <div className="overflow-x-auto -mx-5">
@@ -30,12 +100,11 @@ function DebtsPage() {
               <th className="px-5 py-2 font-medium">Customer</th>
               <th className="px-5 py-2 font-medium">Market</th>
               <th className="px-5 py-2 font-medium text-right">Total Sales</th>
-              <th className="px-5 py-2 font-medium text-right">Debt</th>
+              <th className="px-5 py-2 font-medium text-right">Total Debt</th>
             </tr></thead>
             <tbody>
-              {state.customers.map((c) => {
+              {customersWithDebt.map((c) => {
                 const t = customerTotals(state, c.id);
-                if (t.debt <= 0) return null;
                 return (
                   <tr key={c.id} className="border-b border-border/60 last:border-0">
                     <td className="px-5 py-2 font-medium">{c.name}</td>
@@ -45,6 +114,13 @@ function DebtsPage() {
                   </tr>
                 );
               })}
+              {customersWithDebt.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="px-5 py-8 text-center text-muted-foreground">
+                    No debt found for the selected customer.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -65,10 +141,10 @@ function DebtsPage() {
                 <th className="px-5 py-2 font-medium text-right">Action</th>
               </tr></thead>
               <tbody>
-                {unpaid.map((s) => (
+                {filteredUnpaid.map((s) => (
                   <tr key={s.id} className="border-b border-border/60 last:border-0">
                     <td className="px-5 py-2 font-mono text-xs">{s.receiptNumber}</td>
-                    <td className="px-5 py-2">{state.customers.find((c) => c.id === s.customerId)?.name ?? "—"}</td>
+                    <td className="px-5 py-2">{customerById.get(s.customerId)?.name ?? "—"}</td>
                     <td className="px-5 py-2">{s.date}</td>
                     <td className="px-5 py-2 text-right">{fmtMoney(s.total)}</td>
                     <td className="px-5 py-2 text-right">{fmtMoney(s.paidAmount)}</td>
@@ -77,7 +153,7 @@ function DebtsPage() {
                     <td className="px-5 py-2 text-right"><Button size="sm" onClick={() => { setPaying(s); setAmount(s.total - s.paidAmount); }}>Record Payment</Button></td>
                   </tr>
                 ))}
-                {unpaid.length === 0 && <tr><td colSpan={8} className="px-5 py-8 text-center text-muted-foreground">No outstanding debts. 🎉</td></tr>}
+                {filteredUnpaid.length === 0 && <tr><td colSpan={8} className="px-5 py-8 text-center text-muted-foreground">No outstanding debts. 🎉</td></tr>}
               </tbody>
             </table>
           </div>

@@ -49,14 +49,23 @@ export function PageSection({
   description,
   actions,
   children,
+  className,
+  contentClassName,
 }: {
   title?: string;
   description?: string;
   actions?: React.ReactNode;
   children: React.ReactNode;
+  className?: string;
+  contentClassName?: string;
 }) {
   return (
-    <section className="rounded-xl bg-card border border-border shadow-[var(--shadow-card)]">
+    <section
+      className={cn(
+        "rounded-xl bg-card border border-border shadow-[var(--shadow-card)]",
+        className,
+      )}
+    >
       {(title || actions) && (
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-4 border-b border-border">
           <div>
@@ -66,7 +75,7 @@ export function PageSection({
           {actions && <div className="flex gap-2 flex-wrap">{actions}</div>}
         </div>
       )}
-      <div className="p-5">{children}</div>
+      <div className={cn("p-5", contentClassName)}>{children}</div>
     </section>
   );
 }

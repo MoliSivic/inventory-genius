@@ -86,8 +86,13 @@ function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
-        <PageSection title="Top Profitable Customers" description="By estimated profit">
-          <div className="overflow-x-auto -mx-5">
+        <PageSection
+          title="Top Profitable Customers"
+          description="By estimated profit"
+          className="h-[12cm] flex flex-col"
+          contentClassName="p-0 flex-1 min-h-0"
+        >
+          <div className="h-full overflow-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs uppercase text-muted-foreground border-b border-border">
@@ -120,8 +125,12 @@ function Dashboard() {
           </div>
         </PageSection>
 
-        <PageSection title="Low Stock Products">
-          <div className="space-y-2">
+        <PageSection
+          title="Low Stock Products"
+          className="h-[12cm] flex flex-col"
+          contentClassName="p-0 flex-1 min-h-0"
+        >
+          <div className="h-full overflow-auto p-5 space-y-2">
             {stats.lowStock.length === 0 && (
               <p className="text-sm text-muted-foreground">
                 All products are sufficiently stocked.
@@ -157,8 +166,10 @@ function Dashboard() {
         <PageSection
           title="Recent Sales"
           actions={<ReceiptIcon className="h-4 w-4 text-muted-foreground" />}
+          className="h-[12cm] flex flex-col"
+          contentClassName="p-0 flex-1 min-h-0"
         >
-          <div className="overflow-x-auto -mx-5">
+          <div className="h-full overflow-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs uppercase text-muted-foreground border-b border-border">
@@ -187,8 +198,10 @@ function Dashboard() {
         <PageSection
           title="Recent Stock In"
           actions={<PackagePlus className="h-4 w-4 text-muted-foreground" />}
+          className="h-[12cm] flex flex-col"
+          contentClassName="p-0 flex-1 min-h-0"
         >
-          <div className="overflow-x-auto -mx-5">
+          <div className="h-full overflow-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs uppercase text-muted-foreground border-b border-border">

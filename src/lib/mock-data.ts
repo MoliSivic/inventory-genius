@@ -206,6 +206,28 @@ const seedCustomers: AppState["customers"] = [
     market: "Orussey Market",
     type: "Retailer",
   },
+  {
+    id: "c6",
+    name: "Kimly Store",
+    phone: "+855 10 212 343",
+    market: "Chbar Ampov Market",
+    type: "Retailer",
+    notes: "Usually buys every week",
+  },
+  {
+    id: "c7",
+    name: "Pich Wholesale",
+    phone: "+855 77 456 789",
+    market: "Daeum Kor Market",
+    type: "Wholesaler",
+  },
+  {
+    id: "c8",
+    name: "Ravy Mart",
+    phone: "+855 93 670 125",
+    market: "Boeung Trabek Market",
+    type: "Retailer",
+  },
 ];
 
 export const LEGACY_SAMPLE_PRODUCT_IDS = [
@@ -554,6 +576,101 @@ const seedSales: AppState["sales"] = [
     paymentStatus: "unpaid",
     telegramStatus: "not_sent",
   },
+  // ── Sale 21 — Kimly Store — PAID ──
+  {
+    id: saleId(21),
+    receiptNumber: "R-2021",
+    customerId: "c6",
+    date: "2026-04-26",
+    items: [
+      { productId: khmaoDomId("5 x 9"), quantity: 6, unit: "បេ", stockQuantity: 6, unitPrice: 9.75, avgCostAtSale: 7.5 },
+      { productId: pornLorId("6 x 11"), quantity: 5, unit: "បេ", stockQuantity: 5, unitPrice: 8.75, avgCostAtSale: 6.5 },
+    ],
+    total: 102.25,
+    estimatedProfit: 24.75,
+    paidAmount: 102.25,
+    paymentStatus: "paid",
+    telegramStatus: "not_sent",
+  },
+  // ── Sale 22 — Pich Wholesale — UNPAID ──
+  {
+    id: saleId(22),
+    receiptNumber: "R-2022",
+    customerId: "c7",
+    date: "2026-04-27",
+    items: [
+      { productId: khmaoDomId("8 x 15"), quantity: 7, unit: "បេ", stockQuantity: 7, unitPrice: 14.25, avgCostAtSale: 11 },
+      { productId: pornLorId("8 x 15"), quantity: 6, unit: "បេ", stockQuantity: 6, unitPrice: 11.75, avgCostAtSale: 9 },
+    ],
+    total: 170.25,
+    estimatedProfit: 39.25,
+    paidAmount: 0,
+    paymentStatus: "unpaid",
+    telegramStatus: "not_sent",
+  },
+  // ── Sale 23 — Ravy Mart — PARTIAL ──
+  {
+    id: saleId(23),
+    receiptNumber: "R-2023",
+    customerId: "c8",
+    date: "2026-04-27",
+    items: [
+      { productId: khmaoDomId("6 x 14"), quantity: 4, unit: "បេ", stockQuantity: 4, unitPrice: 12.25, avgCostAtSale: 9.5 },
+      { productId: pornLorId("9 x 18"), quantity: 4, unit: "បេ", stockQuantity: 4, unitPrice: 13.75, avgCostAtSale: 11 },
+    ],
+    total: 104,
+    estimatedProfit: 17,
+    paidAmount: 55,
+    paymentStatus: "partial",
+    telegramStatus: "not_sent",
+  },
+  // ── Sale 24 — Kimly Store — UNPAID ──
+  {
+    id: saleId(24),
+    receiptNumber: "R-2024",
+    customerId: "c6",
+    date: "2026-04-28",
+    items: [
+      { productId: pornLorId("12 x 20"), quantity: 3, unit: "បេ", stockQuantity: 3, unitPrice: 17.75, avgCostAtSale: 14 },
+    ],
+    total: 53.25,
+    estimatedProfit: 11.25,
+    paidAmount: 0,
+    paymentStatus: "unpaid",
+    telegramStatus: "not_sent",
+  },
+  // ── Sale 25 — Pich Wholesale — PARTIAL ──
+  {
+    id: saleId(25),
+    receiptNumber: "R-2025",
+    customerId: "c7",
+    date: "2026-04-29",
+    items: [
+      { productId: khmaoDomId("9 x 18"), quantity: 5, unit: "បេ", stockQuantity: 5, unitPrice: 16.75, avgCostAtSale: 13.5 },
+      { productId: pornLorId("16 x 28"), quantity: 2, unit: "បេ", stockQuantity: 2, unitPrice: 26.5, avgCostAtSale: 21 },
+    ],
+    total: 136.75,
+    estimatedProfit: 26.25,
+    paidAmount: 70,
+    paymentStatus: "partial",
+    telegramStatus: "not_sent",
+  },
+  // ── Sale 26 — Ravy Mart — PAID ──
+  {
+    id: saleId(26),
+    receiptNumber: "R-2026",
+    customerId: "c8",
+    date: "2026-04-30",
+    items: [
+      { productId: khmaoDomId("6 x 11"), quantity: 6, unit: "បេ", stockQuantity: 6, unitPrice: 10.75, avgCostAtSale: 8.5 },
+      { productId: pornLorId("14 x 24"), quantity: 3, unit: "បេ", stockQuantity: 3, unitPrice: 22.5, avgCostAtSale: 17.5 },
+    ],
+    total: 132,
+    estimatedProfit: 26,
+    paidAmount: 132,
+    paymentStatus: "paid",
+    telegramStatus: "customer",
+  },
 ];
 
 /* ── Seed Customer Prices (last-known prices from sales) ──── */
@@ -585,6 +702,17 @@ const seedCustomerPrices: AppState["customerPrices"] = [
   { customerId: "c5", productId: pornLorId("6 x 14"), price: 9.5 },
   { customerId: "c5", productId: khmaoDomId("6 x 14"), price: 12 },
   { customerId: "c5", productId: pornLorId("8 x 15"), price: 11.5 },
+  { customerId: "c6", productId: khmaoDomId("5 x 9"), price: 9.75 },
+  { customerId: "c6", productId: pornLorId("6 x 11"), price: 8.75 },
+  { customerId: "c6", productId: pornLorId("12 x 20"), price: 17.75 },
+  { customerId: "c7", productId: khmaoDomId("8 x 15"), price: 14.25 },
+  { customerId: "c7", productId: pornLorId("8 x 15"), price: 11.75 },
+  { customerId: "c7", productId: khmaoDomId("9 x 18"), price: 16.75 },
+  { customerId: "c7", productId: pornLorId("16 x 28"), price: 26.5 },
+  { customerId: "c8", productId: khmaoDomId("6 x 14"), price: 12.25 },
+  { customerId: "c8", productId: pornLorId("9 x 18"), price: 13.75 },
+  { customerId: "c8", productId: khmaoDomId("6 x 11"), price: 10.75 },
+  { customerId: "c8", productId: pornLorId("14 x 24"), price: 22.5 },
 ];
 
 /* ── Seed Payments ──────────────────────────────────────────── */
@@ -600,12 +728,16 @@ const seedPayments: AppState["payments"] = [
   { id: "pay_s16", customerId: "c1", saleId: saleId(16), amount: 109.5, date: "2026-04-10" },
   { id: "pay_s17", customerId: "c2", saleId: saleId(17), amount: 127.5, date: "2026-04-14" },
   { id: "pay_s19", customerId: "c4", saleId: saleId(19), amount: 78, date: "2026-04-22" },
+  { id: "pay_s21", customerId: "c6", saleId: saleId(21), amount: 102.25, date: "2026-04-26" },
+  { id: "pay_s26", customerId: "c8", saleId: saleId(26), amount: 132, date: "2026-04-30" },
   // Partial payments
   { id: "pay_s4", customerId: "c4", saleId: saleId(4), amount: 80, date: "2026-03-07" },
   { id: "pay_s6", customerId: "c1", saleId: saleId(6), amount: 50, date: "2026-03-12" },
   { id: "pay_s12", customerId: "c2", saleId: saleId(12), amount: 60, date: "2026-03-28" },
   { id: "pay_s15", customerId: "c5", saleId: saleId(15), amount: 30, date: "2026-04-05" },
   { id: "pay_s18", customerId: "c3", saleId: saleId(18), amount: 40, date: "2026-04-18" },
+  { id: "pay_s23", customerId: "c8", saleId: saleId(23), amount: 55, date: "2026-04-27" },
+  { id: "pay_s25", customerId: "c7", saleId: saleId(25), amount: 70, date: "2026-04-29" },
 ];
 
 export const seedData: AppState = {

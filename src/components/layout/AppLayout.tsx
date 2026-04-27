@@ -20,19 +20,53 @@ import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
 
 type NavItem = { to: string; label: string; icon: typeof LayoutDashboard; exact?: boolean };
-const nav: NavItem[] = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboard, exact: true },
-  { to: "/products", label: "Products", icon: Package },
-  { to: "/factories", label: "Factories", icon: Factory },
-  { to: "/customers", label: "Customers", icon: Users },
-  { to: "/stock-in", label: "Stock In", icon: PackagePlus },
-  { to: "/sales", label: "Sales", icon: ShoppingCart },
-  { to: "/customer-prices", label: "Customer Prices", icon: Tag },
-  { to: "/reports", label: "Profit Reports", icon: TrendingUp },
-  { to: "/debts", label: "Debt Tracking", icon: Wallet },
-  { to: "/exports", label: "Exports", icon: FileDown },
-  { to: "/settings", label: "Settings", icon: Settings },
+type NavGroup = {
+  title: string;
+  description: string;
+  items: NavItem[];
+};
+
+const navGroups: NavGroup[] = [
+  {
+    title: "Overview",
+    description: "Start here",
+    items: [{ to: "/", label: "Dashboard", icon: LayoutDashboard, exact: true }],
+  },
+  {
+    title: "Inventory",
+    description: "Products and stock",
+    items: [
+      { to: "/products", label: "Products", icon: Package },
+      { to: "/factories", label: "Factories", icon: Factory },
+      { to: "/stock-in", label: "Stock In", icon: PackagePlus },
+    ],
+  },
+  {
+    title: "Sales",
+    description: "Customers and pricing",
+    items: [
+      { to: "/customers", label: "Customers", icon: Users },
+      { to: "/sales", label: "Sales", icon: ShoppingCart },
+      { to: "/customer-prices", label: "Customer Prices", icon: Tag },
+    ],
+  },
+  {
+    title: "Finance",
+    description: "Reports and debt",
+    items: [
+      { to: "/reports", label: "Profit Reports", icon: TrendingUp },
+      { to: "/debts", label: "Debt Tracking", icon: Wallet },
+      { to: "/exports", label: "Exports", icon: FileDown },
+    ],
+  },
+  {
+    title: "System",
+    description: "App settings",
+    items: [{ to: "/settings", label: "Settings", icon: Settings }],
+  },
 ];
+
+const navItems: NavItem[] = navGroups.flatMap((group) => group.items);
 
 export function AppLayout({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
@@ -72,29 +106,42 @@ export function AppLayout({ children }: { children: ReactNode }) {
             <X className="h-5 w-5" />
           </button>
         </div>
-        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
-          {nav.map((item) => {
-            const active = item.exact
-              ? location.pathname === item.to
-              : location.pathname.startsWith(item.to);
-            const Icon = item.icon;
-            return (
-              <Link
-                key={item.to}
-                to={item.to as never}
-                onClick={() => setOpen(false)}
-                className={cn(
-                  "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                  active
-                    ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm"
-                    : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                )}
-              >
-                <Icon className="h-4 w-4 shrink-0" />
-                <span className="truncate">{item.label}</span>
-              </Link>
-            );
-          })}
+        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-5">
+          {navGroups.map((group) => (
+            <section key={group.title} className="space-y-2">
+              <div className="px-3">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-sidebar-foreground/45">
+                  {group.title}
+                </p>
+                <p className="text-[10px] text-sidebar-foreground/40">{group.description}</p>
+              </div>
+              <div className="space-y-1">
+                {group.items.map((item) => {
+                  const active = item.exact
+                    ? location.pathname === item.to
+                    : location.pathname.startsWith(item.to);
+                  const Icon = item.icon;
+
+                  return (
+                    <Link
+                      key={item.to}
+                      to={item.to as never}
+                      onClick={() => setOpen(false)}
+                      className={cn(
+                        "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                        active
+                          ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm"
+                          : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                      )}
+                    >
+                      <Icon className="h-4 w-4 shrink-0" />
+                      <span className="truncate">{item.label}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+            </section>
+          ))}
         </nav>
         <div className="px-5 py-3 border-t border-sidebar-border text-xs text-sidebar-foreground/50">
           v1.0 · Mock prototype
@@ -113,7 +160,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
               <Menu className="h-5 w-5" />
             </button>
             <h1 className="text-sm sm:text-base font-semibold tracking-tight">
-              {nav.find((n) =>
+              {navItems.find((n) =>
                 n.exact ? location.pathname === n.to : location.pathname.startsWith(n.to),
               )?.label ?? "Dashboard"}
             </h1>

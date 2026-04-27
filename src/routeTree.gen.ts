@@ -20,6 +20,7 @@ import { Route as DebtsRouteImport } from './routes/debts'
 import { Route as CustomersRouteImport } from './routes/customers'
 import { Route as CustomerPricesRouteImport } from './routes/customer-prices'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as CustomerPricesSetupRouteImport } from './routes/customer-prices/setup'
 
 const StockInRoute = StockInRouteImport.update({
   id: '/stock-in',
@@ -76,10 +77,15 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CustomerPricesSetupRoute = CustomerPricesSetupRouteImport.update({
+  id: '/setup',
+  path: '/setup',
+  getParentRoute: () => CustomerPricesRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/customer-prices': typeof CustomerPricesRoute
+  '/customer-prices': typeof CustomerPricesRouteWithChildren
   '/customers': typeof CustomersRoute
   '/debts': typeof DebtsRoute
   '/exports': typeof ExportsRoute
@@ -89,10 +95,11 @@ export interface FileRoutesByFullPath {
   '/sales': typeof SalesRoute
   '/settings': typeof SettingsRoute
   '/stock-in': typeof StockInRoute
+  '/customer-prices/setup': typeof CustomerPricesSetupRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/customer-prices': typeof CustomerPricesRoute
+  '/customer-prices': typeof CustomerPricesRouteWithChildren
   '/customers': typeof CustomersRoute
   '/debts': typeof DebtsRoute
   '/exports': typeof ExportsRoute
@@ -102,11 +109,12 @@ export interface FileRoutesByTo {
   '/sales': typeof SalesRoute
   '/settings': typeof SettingsRoute
   '/stock-in': typeof StockInRoute
+  '/customer-prices/setup': typeof CustomerPricesSetupRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/customer-prices': typeof CustomerPricesRoute
+  '/customer-prices': typeof CustomerPricesRouteWithChildren
   '/customers': typeof CustomersRoute
   '/debts': typeof DebtsRoute
   '/exports': typeof ExportsRoute
@@ -116,6 +124,7 @@ export interface FileRoutesById {
   '/sales': typeof SalesRoute
   '/settings': typeof SettingsRoute
   '/stock-in': typeof StockInRoute
+  '/customer-prices/setup': typeof CustomerPricesSetupRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -131,6 +140,7 @@ export interface FileRouteTypes {
     | '/sales'
     | '/settings'
     | '/stock-in'
+    | '/customer-prices/setup'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -144,6 +154,7 @@ export interface FileRouteTypes {
     | '/sales'
     | '/settings'
     | '/stock-in'
+    | '/customer-prices/setup'
   id:
     | '__root__'
     | '/'
@@ -157,11 +168,12 @@ export interface FileRouteTypes {
     | '/sales'
     | '/settings'
     | '/stock-in'
+    | '/customer-prices/setup'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  CustomerPricesRoute: typeof CustomerPricesRoute
+  CustomerPricesRoute: typeof CustomerPricesRouteWithChildren
   CustomersRoute: typeof CustomersRoute
   DebtsRoute: typeof DebtsRoute
   ExportsRoute: typeof ExportsRoute
@@ -252,12 +264,31 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/customer-prices/setup': {
+      id: '/customer-prices/setup'
+      path: '/setup'
+      fullPath: '/customer-prices/setup'
+      preLoaderRoute: typeof CustomerPricesSetupRouteImport
+      parentRoute: typeof CustomerPricesRoute
+    }
   }
 }
 
+interface CustomerPricesRouteChildren {
+  CustomerPricesSetupRoute: typeof CustomerPricesSetupRoute
+}
+
+const CustomerPricesRouteChildren: CustomerPricesRouteChildren = {
+  CustomerPricesSetupRoute: CustomerPricesSetupRoute,
+}
+
+const CustomerPricesRouteWithChildren = CustomerPricesRoute._addFileChildren(
+  CustomerPricesRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  CustomerPricesRoute: CustomerPricesRoute,
+  CustomerPricesRoute: CustomerPricesRouteWithChildren,
   CustomersRoute: CustomersRoute,
   DebtsRoute: DebtsRoute,
   ExportsRoute: ExportsRoute,

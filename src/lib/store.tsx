@@ -810,6 +810,13 @@ interface StoreContextValue {
   // customers
   upsertCustomer: (c: Omit<Customer, "id"> & { id?: string }) => void;
   deleteCustomer: (id: string) => void;
+  setCustomerProductPrices: (
+    customerId: string,
+    entries: Array<{
+      productId: string;
+      price: number | null;
+    }>,
+  ) => void;
   // stock in
   addStockIn: (data: Omit<StockInInvoice, "id" | "total">) => StockInInvoice;
   updateStockIn: (invoiceId: string, data: Omit<StockInInvoice, "id" | "total">) => StoreResult;
@@ -1224,6 +1231,54 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setState((s) => ({ ...s, customers: s.customers.filter((c) => c.id !== id) }));
   }, []);
 
+  const setCustomerProductPrices: StoreContextValue["setCustomerProductPrices"] = useCallback(
+    (customerId, entries) => {
+      if (!customerId) return;
+
+      setState((s) => {
+        const normalizedEntries = entries
+          .map((entry) => {
+            if (!entry.productId) return null;
+            if (entry.price === null) {
+              return { productId: entry.productId, price: null as number | null };
+            }
+
+            if (!Number.isFinite(entry.price)) return null;
+            return {
+              productId: entry.productId,
+              price: Number(Math.max(entry.price, 0).toFixed(2)),
+            };
+          })
+          .filter((entry): entry is { productId: string; price: number | null } => entry !== null);
+
+        if (normalizedEntries.length === 0) return s;
+
+        const updatedProductIds = new Set(normalizedEntries.map((entry) => entry.productId));
+        const customerPrices = s.customerPrices.filter(
+          (customerPrice) =>
+            !(customerPrice.customerId === customerId && updatedProductIds.has(customerPrice.productId)),
+        );
+
+        normalizedEntries.forEach((entry) => {
+          if (entry.price === null || entry.price <= 0) return;
+
+          customerPrices.push({
+            customerId,
+            productId: entry.productId,
+            unit: undefined,
+            price: entry.price,
+          });
+        });
+
+        return {
+          ...s,
+          customerPrices,
+        };
+      });
+    },
+    [],
+  );
+
   const addStockIn: StoreContextValue["addStockIn"] = useCallback((data) => {
     let created!: StockInInvoice;
     setState((s) => {
@@ -1544,6 +1599,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       deleteFactory,
       upsertCustomer,
       deleteCustomer,
+      setCustomerProductPrices,
       addStockIn,
       updateStockIn,
       addSale,
@@ -1569,6 +1625,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       deleteFactory,
       upsertCustomer,
       deleteCustomer,
+      setCustomerProductPrices,
       addStockIn,
       updateStockIn,
       addSale,

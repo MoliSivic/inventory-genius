@@ -1,28 +1,27 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { createFileRoute, Link, Outlet, useLocation } from "@tanstack/react-router";
+import { useMemo, useState } from "react";
 import { Search } from "lucide-react";
-import { useStore, fmtMoney } from "@/lib/store";
+import { useStore } from "@/lib/store";
 import { normalizeMarkets, sameMarketName } from "@/lib/markets";
 import { PageHeader, PageSection } from "@/components/app/StatCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export const Route = createFileRoute("/customer-prices")({ component: CustomerPricesPage });
 
 function CustomerPricesPage() {
+  const location = useLocation();
+
   const { state } = useStore();
   const [market, setMarket] = useState("all");
-  const [customer, setCustomer] = useState("all");
   const [search, setSearch] = useState("");
-  const [viewingCustomerId, setViewingCustomerId] = useState<string | null>(null);
 
   const markets = useMemo(
     () => normalizeMarkets(state.markets, state.customers),
@@ -31,132 +30,117 @@ function CustomerPricesPage() {
 
   const recentProductPricesByCustomer = useMemo(() => {
     const sortedSales = [...state.sales].sort((a, b) => b.date.localeCompare(a.date));
-    const byCustomer = new Map<
-      string,
-      Array<{ productId: string; price: number; lastBoughtDate: string }>
-    >();
-    const seenByCustomer = new Map<string, Set<string>>();
+    const byCustomer = new Map<string, Map<string, string>>();
 
     for (const sale of sortedSales) {
-      const seenProducts = seenByCustomer.get(sale.customerId) ?? new Set<string>();
-      const rows = byCustomer.get(sale.customerId) ?? [];
-
+      const products = byCustomer.get(sale.customerId) ?? new Map<string, string>();
       for (const item of sale.items) {
-        if (seenProducts.has(item.productId)) continue;
-
-        seenProducts.add(item.productId);
-        rows.push({
-          productId: item.productId,
-          price: item.unitPrice,
-          lastBoughtDate: sale.date,
-        });
+        if (!products.has(item.productId)) {
+          products.set(item.productId, sale.date);
+        }
       }
-
-      seenByCustomer.set(sale.customerId, seenProducts);
-      byCustomer.set(sale.customerId, rows);
+      byCustomer.set(sale.customerId, products);
     }
 
     return byCustomer;
   }, [state.sales]);
 
-  const customerOptions = useMemo(
-    () =>
-      state.customers.filter(
-        (c) => market === "all" || sameMarketName(c.market, market),
-      ),
-    [state.customers, market],
-  );
+  const rememberedProductCountByCustomer = useMemo(() => {
+    const byCustomer = new Map<string, Set<string>>();
 
-  useEffect(() => {
-    if (customer === "all") return;
-    if (!customerOptions.some((c) => c.id === customer)) {
-      setCustomer("all");
+    for (const customerPrice of state.customerPrices) {
+      const products = byCustomer.get(customerPrice.customerId) ?? new Set<string>();
+      products.add(customerPrice.productId);
+      byCustomer.set(customerPrice.customerId, products);
     }
-  }, [customer, customerOptions]);
 
-  useEffect(() => {
-    if (!viewingCustomerId) return;
-    if (!state.customers.some((c) => c.id === viewingCustomerId)) {
-      setViewingCustomerId(null);
-    }
-  }, [state.customers, viewingCustomerId]);
+    return byCustomer;
+  }, [state.customerPrices]);
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
 
-    return customerOptions
-      .filter((c) => {
-        if (customer !== "all" && c.id !== customer) return false;
-
-        const recentProducts = recentProductPricesByCustomer.get(c.id) ?? [];
-        if (recentProducts.length === 0) return false;
-
+    return state.customers
+      .filter((customer) => {
+        if (market !== "all" && !sameMarketName(customer.market, market)) return false;
         if (!q) return true;
 
-        const matchesCustomer = c.name.toLowerCase().includes(q);
-        if (matchesCustomer) return true;
-
-        return recentProducts.some((row) => {
-          const productName = state.products.find((p) => p.id === row.productId)?.name ?? "";
-          return productName.toLowerCase().includes(q);
-        });
+        return customer.name.toLowerCase().includes(q) || customer.market.toLowerCase().includes(q);
       })
-      .map((c) => ({
-        id: c.id,
-        name: c.name,
-        market: c.market,
-        recentProducts: recentProductPricesByCustomer.get(c.id) ?? [],
-      }));
+      .map((customer) => {
+        const recentProducts = recentProductPricesByCustomer.get(customer.id) ?? new Map();
+        const rememberedProducts = rememberedProductCountByCustomer.get(customer.id) ?? new Set();
+        const trackedProductIds = new Set<string>([
+          ...Array.from(recentProducts.keys()),
+          ...Array.from(rememberedProducts.values()),
+        ]);
+
+        const latestBoughtDate =
+          [...recentProducts.values()].sort((a, b) => b.localeCompare(a))[0] ?? "-";
+
+        return {
+          id: customer.id,
+          name: customer.name,
+          market: customer.market,
+          trackedProducts: trackedProductIds.size,
+          latestBoughtDate,
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
   }, [
-    customer,
-    customerOptions,
+    market,
+    rememberedProductCountByCustomer,
     recentProductPricesByCustomer,
     search,
-    state.products,
+    state.customers,
   ]);
 
-  const viewingCustomer = state.customers.find((c) => c.id === viewingCustomerId) ?? null;
-  const viewingRows = viewingCustomerId
-    ? recentProductPricesByCustomer.get(viewingCustomerId) ?? []
-    : [];
+  if (location.pathname.startsWith("/customer-prices/setup")) {
+    return <Outlet />;
+  }
 
   return (
     <div>
-      <PageHeader title="Customer-Specific Prices" description="Remembered usual prices per customer. The latest sale price is auto-saved here." />
+      <PageHeader
+        title="Customer-Specific Prices"
+        description="Filter by customer or market here, then use View to inspect and Set Prices to update customer pricing."
+      />
+
       <PageSection>
         <div className="flex flex-col sm:flex-row gap-3 mb-4">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search..." className="pl-9" />
+            <Input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search customers..."
+              className="pl-9"
+            />
           </div>
-          <Select
-            value={market}
-            onValueChange={(value) => {
-              setMarket(value);
-              setCustomer("all");
-            }}
-          >
-            <SelectTrigger className="sm:w-48"><SelectValue placeholder="Market" /></SelectTrigger>
+
+          <Select value={market} onValueChange={setMarket}>
+            <SelectTrigger className="sm:w-56">
+              <SelectValue />
+            </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All markets</SelectItem>
-              {markets.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <Select value={customer} onValueChange={setCustomer}>
-            <SelectTrigger className="sm:w-56"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All customers</SelectItem>
-              {customerOptions.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+              {markets.map((marketItem) => (
+                <SelectItem key={marketItem} value={marketItem}>
+                  {marketItem}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
+
         <div className="overflow-x-auto -mx-5">
-          <table className="w-full text-sm min-w-[720px]">
+          <table className="w-full text-sm min-w-[760px]">
             <thead>
               <tr className="text-left text-xs uppercase text-muted-foreground border-b border-border">
                 <th className="px-5 py-2 font-medium">Customer</th>
                 <th className="px-5 py-2 font-medium">Market</th>
-                <th className="px-5 py-2 font-medium text-right">Recent Products</th>
+                <th className="px-5 py-2 font-medium text-right">Tracked Products</th>
+                <th className="px-5 py-2 font-medium text-right">Latest Bought</th>
                 <th className="px-5 py-2 font-medium text-right">Action</th>
               </tr>
             </thead>
@@ -165,65 +149,44 @@ function CustomerPricesPage() {
                 <tr key={row.id} className="border-b border-border/60 last:border-0">
                   <td className="px-5 py-2 font-medium">{row.name}</td>
                   <td className="px-5 py-2">{row.market}</td>
-                  <td className="px-5 py-2 text-right">{row.recentProducts.length}</td>
-                  <td className="px-5 py-2 text-right">
-                    <Button size="sm" variant="outline" onClick={() => setViewingCustomerId(row.id)}>
-                      View Prices
-                    </Button>
+                  <td className="px-5 py-2 text-right">{row.trackedProducts}</td>
+                  <td className="px-5 py-2 text-right text-muted-foreground">
+                    {row.latestBoughtDate}
+                  </td>
+                  <td className="px-5 py-2">
+                    <div className="flex items-center justify-end gap-2">
+                      <Button size="sm" variant="outline" asChild>
+                        <Link
+                          to="/customer-prices/setup"
+                          search={{ customerId: row.id, mode: "view" }}
+                        >
+                          View
+                        </Link>
+                      </Button>
+                      <Button size="sm" asChild>
+                        <Link
+                          to="/customer-prices/setup"
+                          search={{ customerId: row.id, mode: "edit" }}
+                        >
+                          Set Prices
+                        </Link>
+                      </Button>
+                    </div>
                   </td>
                 </tr>
               ))}
-              {rows.length === 0 && <tr><td colSpan={4} className="px-5 py-8 text-center text-muted-foreground">No prices yet.</td></tr>}
+
+              {rows.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-5 py-8 text-center text-muted-foreground">
+                    No customers found.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
       </PageSection>
-
-      <Dialog open={!!viewingCustomer} onOpenChange={(open) => !open && setViewingCustomerId(null)}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>
-              {viewingCustomer?.name ?? "Customer"} Recent Product Prices
-            </DialogTitle>
-          </DialogHeader>
-
-          <div className="overflow-x-auto -mx-2">
-            <table className="w-full text-sm min-w-[520px]">
-              <thead>
-                <tr className="text-left text-xs uppercase text-muted-foreground border-b border-border">
-                  <th className="px-2 py-2 font-medium">Product</th>
-                  <th className="px-2 py-2 font-medium">Last Bought</th>
-                  <th className="px-2 py-2 font-medium text-right">Usual Price</th>
-                </tr>
-              </thead>
-              <tbody>
-                {viewingRows.map((row) => (
-                  <tr key={row.productId} className="border-b border-border/60 last:border-0">
-                    <td className="px-2 py-2">
-                      {state.products.find((p) => p.id === row.productId)?.name ?? "—"}
-                    </td>
-                    <td className="px-2 py-2">{row.lastBoughtDate}</td>
-                    <td className="px-2 py-2 text-right font-medium">{fmtMoney(row.price)}</td>
-                  </tr>
-                ))}
-                {viewingRows.length === 0 && (
-                  <tr>
-                    <td colSpan={3} className="px-2 py-8 text-center text-muted-foreground">
-                      No recent products for this customer.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setViewingCustomerId(null)}>
-              Close
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
