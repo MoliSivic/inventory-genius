@@ -19,8 +19,14 @@ import { Route as ExportsRouteImport } from './routes/exports'
 import { Route as DebtsRouteImport } from './routes/debts'
 import { Route as CustomersRouteImport } from './routes/customers'
 import { Route as CustomerPricesRouteImport } from './routes/customer-prices'
+import { Route as AuthRouteImport } from './routes/auth'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuthIndexRouteImport } from './routes/auth/index'
 import { Route as CustomerPricesSetupRouteImport } from './routes/customer-prices/setup'
+import { Route as AuthSignUpRouteImport } from './routes/auth/sign-up'
+import { Route as AuthResetPasswordRouteImport } from './routes/auth/reset-password'
+import { Route as AuthForgotPasswordRouteImport } from './routes/auth/forgot-password'
+import { Route as AuthConfirmRouteImport } from './routes/auth/confirm'
 
 const StockInRoute = StockInRouteImport.update({
   id: '/stock-in',
@@ -72,19 +78,50 @@ const CustomerPricesRoute = CustomerPricesRouteImport.update({
   path: '/customer-prices',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthRoute = AuthRouteImport.update({
+  id: '/auth',
+  path: '/auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AuthIndexRoute = AuthIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AuthRoute,
 } as any)
 const CustomerPricesSetupRoute = CustomerPricesSetupRouteImport.update({
   id: '/setup',
   path: '/setup',
   getParentRoute: () => CustomerPricesRoute,
 } as any)
+const AuthSignUpRoute = AuthSignUpRouteImport.update({
+  id: '/sign-up',
+  path: '/sign-up',
+  getParentRoute: () => AuthRoute,
+} as any)
+const AuthResetPasswordRoute = AuthResetPasswordRouteImport.update({
+  id: '/reset-password',
+  path: '/reset-password',
+  getParentRoute: () => AuthRoute,
+} as any)
+const AuthForgotPasswordRoute = AuthForgotPasswordRouteImport.update({
+  id: '/forgot-password',
+  path: '/forgot-password',
+  getParentRoute: () => AuthRoute,
+} as any)
+const AuthConfirmRoute = AuthConfirmRouteImport.update({
+  id: '/confirm',
+  path: '/confirm',
+  getParentRoute: () => AuthRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/auth': typeof AuthRouteWithChildren
   '/customer-prices': typeof CustomerPricesRouteWithChildren
   '/customers': typeof CustomersRoute
   '/debts': typeof DebtsRoute
@@ -95,7 +132,12 @@ export interface FileRoutesByFullPath {
   '/sales': typeof SalesRoute
   '/settings': typeof SettingsRoute
   '/stock-in': typeof StockInRoute
+  '/auth/confirm': typeof AuthConfirmRoute
+  '/auth/forgot-password': typeof AuthForgotPasswordRoute
+  '/auth/reset-password': typeof AuthResetPasswordRoute
+  '/auth/sign-up': typeof AuthSignUpRoute
   '/customer-prices/setup': typeof CustomerPricesSetupRoute
+  '/auth/': typeof AuthIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -109,11 +151,17 @@ export interface FileRoutesByTo {
   '/sales': typeof SalesRoute
   '/settings': typeof SettingsRoute
   '/stock-in': typeof StockInRoute
+  '/auth/confirm': typeof AuthConfirmRoute
+  '/auth/forgot-password': typeof AuthForgotPasswordRoute
+  '/auth/reset-password': typeof AuthResetPasswordRoute
+  '/auth/sign-up': typeof AuthSignUpRoute
   '/customer-prices/setup': typeof CustomerPricesSetupRoute
+  '/auth': typeof AuthIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/auth': typeof AuthRouteWithChildren
   '/customer-prices': typeof CustomerPricesRouteWithChildren
   '/customers': typeof CustomersRoute
   '/debts': typeof DebtsRoute
@@ -124,12 +172,18 @@ export interface FileRoutesById {
   '/sales': typeof SalesRoute
   '/settings': typeof SettingsRoute
   '/stock-in': typeof StockInRoute
+  '/auth/confirm': typeof AuthConfirmRoute
+  '/auth/forgot-password': typeof AuthForgotPasswordRoute
+  '/auth/reset-password': typeof AuthResetPasswordRoute
+  '/auth/sign-up': typeof AuthSignUpRoute
   '/customer-prices/setup': typeof CustomerPricesSetupRoute
+  '/auth/': typeof AuthIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/auth'
     | '/customer-prices'
     | '/customers'
     | '/debts'
@@ -140,7 +194,12 @@ export interface FileRouteTypes {
     | '/sales'
     | '/settings'
     | '/stock-in'
+    | '/auth/confirm'
+    | '/auth/forgot-password'
+    | '/auth/reset-password'
+    | '/auth/sign-up'
     | '/customer-prices/setup'
+    | '/auth/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -154,10 +213,16 @@ export interface FileRouteTypes {
     | '/sales'
     | '/settings'
     | '/stock-in'
+    | '/auth/confirm'
+    | '/auth/forgot-password'
+    | '/auth/reset-password'
+    | '/auth/sign-up'
     | '/customer-prices/setup'
+    | '/auth'
   id:
     | '__root__'
     | '/'
+    | '/auth'
     | '/customer-prices'
     | '/customers'
     | '/debts'
@@ -168,11 +233,17 @@ export interface FileRouteTypes {
     | '/sales'
     | '/settings'
     | '/stock-in'
+    | '/auth/confirm'
+    | '/auth/forgot-password'
+    | '/auth/reset-password'
+    | '/auth/sign-up'
     | '/customer-prices/setup'
+    | '/auth/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AuthRoute: typeof AuthRouteWithChildren
   CustomerPricesRoute: typeof CustomerPricesRouteWithChildren
   CustomersRoute: typeof CustomersRoute
   DebtsRoute: typeof DebtsRoute
@@ -257,12 +328,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CustomerPricesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/auth': {
+      id: '/auth'
+      path: '/auth'
+      fullPath: '/auth'
+      preLoaderRoute: typeof AuthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/auth/': {
+      id: '/auth/'
+      path: '/'
+      fullPath: '/auth/'
+      preLoaderRoute: typeof AuthIndexRouteImport
+      parentRoute: typeof AuthRoute
     }
     '/customer-prices/setup': {
       id: '/customer-prices/setup'
@@ -271,8 +356,54 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CustomerPricesSetupRouteImport
       parentRoute: typeof CustomerPricesRoute
     }
+    '/auth/sign-up': {
+      id: '/auth/sign-up'
+      path: '/sign-up'
+      fullPath: '/auth/sign-up'
+      preLoaderRoute: typeof AuthSignUpRouteImport
+      parentRoute: typeof AuthRoute
+    }
+    '/auth/reset-password': {
+      id: '/auth/reset-password'
+      path: '/reset-password'
+      fullPath: '/auth/reset-password'
+      preLoaderRoute: typeof AuthResetPasswordRouteImport
+      parentRoute: typeof AuthRoute
+    }
+    '/auth/forgot-password': {
+      id: '/auth/forgot-password'
+      path: '/forgot-password'
+      fullPath: '/auth/forgot-password'
+      preLoaderRoute: typeof AuthForgotPasswordRouteImport
+      parentRoute: typeof AuthRoute
+    }
+    '/auth/confirm': {
+      id: '/auth/confirm'
+      path: '/confirm'
+      fullPath: '/auth/confirm'
+      preLoaderRoute: typeof AuthConfirmRouteImport
+      parentRoute: typeof AuthRoute
+    }
   }
 }
+
+interface AuthRouteChildren {
+  AuthConfirmRoute: typeof AuthConfirmRoute
+  AuthForgotPasswordRoute: typeof AuthForgotPasswordRoute
+  AuthResetPasswordRoute: typeof AuthResetPasswordRoute
+  AuthSignUpRoute: typeof AuthSignUpRoute
+  AuthIndexRoute: typeof AuthIndexRoute
+}
+
+const AuthRouteChildren: AuthRouteChildren = {
+  AuthConfirmRoute: AuthConfirmRoute,
+  AuthForgotPasswordRoute: AuthForgotPasswordRoute,
+  AuthResetPasswordRoute: AuthResetPasswordRoute,
+  AuthSignUpRoute: AuthSignUpRoute,
+  AuthIndexRoute: AuthIndexRoute,
+}
+
+const AuthRouteWithChildren = AuthRoute._addFileChildren(AuthRouteChildren)
 
 interface CustomerPricesRouteChildren {
   CustomerPricesSetupRoute: typeof CustomerPricesSetupRoute
@@ -288,6 +419,7 @@ const CustomerPricesRouteWithChildren = CustomerPricesRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AuthRoute: AuthRouteWithChildren,
   CustomerPricesRoute: CustomerPricesRouteWithChildren,
   CustomersRoute: CustomersRoute,
   DebtsRoute: DebtsRoute,

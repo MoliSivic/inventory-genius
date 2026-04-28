@@ -22,7 +22,7 @@ export function StatCard({
     primary: "bg-primary/15 text-primary",
   };
   return (
-    <div className="rounded-xl bg-card border border-border p-5 shadow-[var(--shadow-card)]">
+    <div className="min-w-0 rounded-xl border border-border bg-card p-5 shadow-[var(--shadow-card)]">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
@@ -62,20 +62,20 @@ export function PageSection({
   return (
     <section
       className={cn(
-        "rounded-xl bg-card border border-border shadow-[var(--shadow-card)]",
+        "min-w-0 overflow-hidden rounded-xl border border-border bg-card shadow-[var(--shadow-card)]",
         className,
       )}
     >
       {(title || actions) && (
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-4 border-b border-border">
-          <div>
-            {title && <h2 className="text-base font-semibold">{title}</h2>}
+        <div className="flex flex-col justify-between gap-3 border-b border-border px-5 py-4 sm:flex-row sm:items-center">
+          <div className="min-w-0">
+            {title && <h2 className="truncate text-base font-semibold">{title}</h2>}
             {description && <p className="text-xs text-muted-foreground mt-0.5">{description}</p>}
           </div>
-          {actions && <div className="flex gap-2 flex-wrap">{actions}</div>}
+          {actions && <div className="flex shrink-0 flex-wrap gap-2">{actions}</div>}
         </div>
       )}
-      <div className={cn("p-5", contentClassName)}>{children}</div>
+      <div className={cn("min-w-0 p-5", contentClassName)}>{children}</div>
     </section>
   );
 }
@@ -90,12 +90,12 @@ export function PageHeader({
   actions?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 mb-6">
-      <div>
+    <div className="mb-6 flex min-w-0 flex-col justify-between gap-3 sm:flex-row sm:items-end">
+      <div className="min-w-0">
         <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
         {description && <p className="text-sm text-muted-foreground mt-1">{description}</p>}
       </div>
-      {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
+      {actions && <div className="flex shrink-0 flex-wrap gap-2 sm:justify-end">{actions}</div>}
     </div>
   );
 }

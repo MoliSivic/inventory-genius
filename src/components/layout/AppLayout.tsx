@@ -1,5 +1,5 @@
-import { Link, useLocation } from "@tanstack/react-router";
-import { useState, type ReactNode } from "react";
+import { Link, useLocation, useNavigate } from "@tanstack/react-router";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   LayoutDashboard,
   Package,
@@ -18,6 +18,17 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
+import { Button } from "@/components/ui/button";
+import {
+  getMockAuthUser,
+  getSupabaseClient,
+  getSupabaseUnavailableMessage,
+  isMockAuthEnabled,
+  MOCK_AUTH_STATE_CHANGED_EVENT,
+  signOutMockAuth,
+  isSupabaseReady,
+} from "@/lib/supabase";
+import { toast } from "sonner";
 
 type NavItem = { to: string; label: string; icon: typeof LayoutDashboard; exact?: boolean };
 type NavGroup = {
@@ -68,25 +79,161 @@ const navGroups: NavGroup[] = [
 
 const navItems: NavItem[] = navGroups.flatMap((group) => group.items);
 
+function fallbackNameFromEmail(email: string | null) {
+  if (!email) return null;
+  const localPart = email.split("@")[0]?.trim();
+  if (!localPart) return null;
+  return localPart.charAt(0).toUpperCase() + localPart.slice(1);
+}
+
+function resolveDisplayName(name: unknown, email: string | null) {
+  if (typeof name === "string" && name.trim()) {
+    return name.trim();
+  }
+
+  return fallbackNameFromEmail(email);
+}
+
 export function AppLayout({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const { state } = useStore();
   const location = useLocation();
+  const navigate = useNavigate();
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [userName, setUserName] = useState<string | null>(null);
+  const [isAuthResolved, setIsAuthResolved] = useState(false);
+  const isAuthPage = location.pathname.startsWith("/auth");
+
+  useEffect(() => {
+    if (isSupabaseReady) {
+      const supabase = getSupabaseClient();
+      let isMounted = true;
+
+      void supabase.auth.getSession().then(({ data }) => {
+        if (!isMounted) return;
+        const email = data.session?.user?.email ?? null;
+        const profileName =
+          data.session?.user?.user_metadata?.full_name ?? data.session?.user?.user_metadata?.name;
+
+        setUserEmail(email);
+        setUserName(resolveDisplayName(profileName, email));
+        setIsAuthResolved(true);
+      });
+
+      const { data: subscription } = supabase.auth.onAuthStateChange((_event, session) => {
+        const email = session?.user?.email ?? null;
+        const profileName =
+          session?.user?.user_metadata?.full_name ?? session?.user?.user_metadata?.name;
+
+        setUserEmail(email);
+        setUserName(resolveDisplayName(profileName, email));
+        setIsAuthResolved(true);
+      });
+
+      return () => {
+        isMounted = false;
+        subscription.subscription.unsubscribe();
+      };
+    }
+
+    if (isMockAuthEnabled) {
+      const syncMockEmail = () => {
+        const mockUser = getMockAuthUser();
+        const email = mockUser?.email ?? null;
+
+        setUserEmail(email);
+        setUserName(resolveDisplayName(mockUser?.name, email));
+        setIsAuthResolved(true);
+      };
+
+      syncMockEmail();
+      window.addEventListener(MOCK_AUTH_STATE_CHANGED_EVENT, syncMockEmail);
+      window.addEventListener("storage", syncMockEmail);
+
+      return () => {
+        window.removeEventListener(MOCK_AUTH_STATE_CHANGED_EVENT, syncMockEmail);
+        window.removeEventListener("storage", syncMockEmail);
+      };
+    }
+
+    setUserEmail(null);
+    setUserName(null);
+    setIsAuthResolved(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isAuthResolved) return;
+
+    if (isAuthPage && userEmail) {
+      void navigate({ to: "/", replace: true });
+      return;
+    }
+
+    if (!isAuthPage && !userEmail) {
+      void navigate({ to: "/auth", replace: true });
+    }
+  }, [isAuthPage, isAuthResolved, navigate, userEmail]);
+
+  const handleSignOut = async () => {
+    if (isMockAuthEnabled) {
+      signOutMockAuth();
+      setUserEmail(null);
+      setUserName(null);
+      toast.success("Logged out successfully.");
+      await navigate({ to: "/auth" });
+      return;
+    }
+
+    if (!isSupabaseReady) {
+      toast.error(getSupabaseUnavailableMessage());
+      return;
+    }
+
+    const supabase = getSupabaseClient();
+    const { error } = await supabase.auth.signOut();
+
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+
+    setUserEmail(null);
+    setUserName(null);
+    toast.success("Logged out successfully.");
+    await navigate({ to: "/auth" });
+  };
+
+  if (isAuthPage) {
+    return (
+      <div className="min-h-dvh w-full overflow-x-hidden bg-background text-foreground">
+        {children}
+      </div>
+    );
+  }
+
+  if (!isAuthResolved) {
+    return (
+      <div className="flex min-h-dvh w-full items-center justify-center overflow-x-hidden bg-background text-muted-foreground">
+        Checking session...
+      </div>
+    );
+  }
+
+  if (!userEmail) {
+    return null;
+  }
 
   return (
-    <div className="min-h-screen flex bg-background text-foreground">
+    <div className="flex min-h-dvh w-full overflow-x-hidden bg-background text-foreground">
       {/* Mobile overlay */}
       {open && (
-        <div
-          className="fixed inset-0 z-30 bg-black/40 lg:hidden"
-          onClick={() => setOpen(false)}
-        />
+        <div className="fixed inset-0 z-30 bg-black/40 lg:hidden" onClick={() => setOpen(false)} />
       )}
 
       {/* Sidebar */}
       <aside
         className={cn(
-          "fixed lg:sticky top-0 left-0 z-40 h-screen w-64 bg-sidebar text-sidebar-foreground flex flex-col transition-transform lg:translate-x-0",
+          "fixed left-0 top-0 z-40 flex h-dvh w-64 shrink-0 flex-col bg-sidebar text-sidebar-foreground transition-transform lg:sticky lg:translate-x-0",
           open ? "translate-x-0" : "-translate-x-full",
         )}
       >
@@ -149,27 +296,50 @@ export function AppLayout({ children }: { children: ReactNode }) {
       </aside>
 
       {/* Main */}
-      <div className="flex-1 flex flex-col min-w-0">
-        <header className="sticky top-0 z-20 bg-background/80 backdrop-blur border-b border-border">
-          <div className="flex items-center gap-3 px-4 sm:px-6 h-14">
-            <button
-              className="lg:hidden p-2 -ml-2 rounded hover:bg-muted"
+      <div className="flex min-h-dvh min-w-0 flex-1 flex-col overflow-x-hidden">
+        <header className="sticky top-0 z-20 shrink-0 border-b border-border bg-background/90 backdrop-blur">
+          <div className="mx-auto flex h-14 w-full max-w-[1400px] items-center gap-3 px-4 sm:px-6">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="-ml-2 shrink-0 lg:hidden"
               onClick={() => setOpen(true)}
               aria-label="Open menu"
             >
               <Menu className="h-5 w-5" />
-            </button>
-            <h1 className="text-sm sm:text-base font-semibold tracking-tight">
+            </Button>
+            <h1 className="min-w-0 flex-1 truncate text-sm font-semibold tracking-tight sm:text-base">
               {navItems.find((n) =>
                 n.exact ? location.pathname === n.to : location.pathname.startsWith(n.to),
               )?.label ?? "Dashboard"}
             </h1>
-            <div className="ml-auto text-xs text-muted-foreground hidden sm:block">
-              Owner / Admin
+            <div className="flex shrink-0 items-center gap-2">
+              <div className="hidden w-[220px] flex-col items-end leading-tight sm:flex">
+                <span className="w-full truncate text-right text-xs font-semibold text-foreground">
+                  {userName ?? "User"}
+                </span>
+                {userEmail && (
+                  <span className="w-full truncate text-right text-[11px] text-muted-foreground">
+                    {userEmail}
+                  </span>
+                )}
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="destructive"
+                className="w-[76px] shrink-0 px-0"
+                onClick={handleSignOut}
+              >
+                Log Out
+              </Button>
             </div>
           </div>
         </header>
-        <main className="flex-1 p-4 sm:p-6 max-w-[1400px] w-full mx-auto">{children}</main>
+        <main className="mx-auto flex w-full max-w-[1400px] flex-1 flex-col p-4 sm:p-6">
+          <div className="w-full min-w-0">{children}</div>
+        </main>
       </div>
     </div>
   );

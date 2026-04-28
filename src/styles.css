@@ -149,7 +149,15 @@
     border-color: var(--color-border);
   }
 
+  html {
+    min-height: 100%;
+    scrollbar-gutter: stable;
+  }
+
   body {
+    min-height: 100%;
+    min-width: 320px;
+    overflow-x: hidden;
     background-color: var(--color-background);
     color: var(--color-foreground);
   }
@@ -165,11 +173,7 @@
 @layer utilities {
   .khmer-ui-text {
     font-family:
-      "Noto Sans Khmer",
-      "Khmer OS Battambang",
-      "Khmer Sangam MN",
-      "Koh Santepheap",
-      system-ui,
+      "Noto Sans Khmer", "Khmer OS Battambang", "Khmer Sangam MN", "Koh Santepheap", system-ui,
       sans-serif;
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
@@ -180,7 +184,8 @@
   --y: translateX(110%);
 }
 
-[data-sonner-toaster] [data-sonner-toast][data-mounted="true"][data-x-position="right"][data-y-position="top"] {
+[data-sonner-toaster]
+  [data-sonner-toast][data-mounted="true"][data-x-position="right"][data-y-position="top"] {
   --y: translateX(0);
 }
 
