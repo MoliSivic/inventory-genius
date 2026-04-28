@@ -1,10 +1,12 @@
 import { Link, Outlet, createFileRoute, useLocation } from "@tanstack/react-router";
+import type { Session } from "@supabase/supabase-js";
 import {
   Boxes,
   LogOut,
   Menu,
   PackageCheck,
   ReceiptText,
+  Settings,
   ShoppingBag,
   WalletCards,
 } from "lucide-react";
@@ -20,7 +22,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { useStore } from "@/lib/store";
-import { getSupabaseClient, isSupabaseReady } from "@/lib/supabase";
+import { getSupabaseClient, getSupabaseUserProfile, isSupabaseReady } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/buyer")({
@@ -32,6 +34,7 @@ function BuyerLayout() {
   const navigate = Route.useNavigate();
   const location = useLocation();
   const [authEmail, setAuthEmail] = useState<string | null>(null);
+  const [authName, setAuthName] = useState<string | null>(null);
   const [isSupabaseAuthResolved, setIsSupabaseAuthResolved] = useState(!isSupabaseReady);
   const isLegacyEntryPage =
     location.pathname === "/buyer" || location.pathname === "/buyer/sign-up";
@@ -42,15 +45,36 @@ function BuyerLayout() {
     const supabase = getSupabaseClient();
     let isMounted = true;
 
-    void supabase.auth.getSession().then(({ data }) => {
+    const syncSession = async (session: Session | null) => {
       if (!isMounted) return;
-      setAuthEmail(data.session?.user.email ?? null);
+
+      if (!session?.user) {
+        setAuthEmail(null);
+        setAuthName(null);
+        setIsSupabaseAuthResolved(true);
+        return;
+      }
+
+      const profile = await getSupabaseUserProfile(session.user);
+      if (!isMounted) return;
+
+      const metadataName =
+        session.user.user_metadata?.full_name ?? session.user.user_metadata?.name;
+      const profileName =
+        profile.fullName ??
+        (typeof metadataName === "string" && metadataName.trim() ? metadataName.trim() : null);
+
+      setAuthEmail(profile.email || session.user.email || null);
+      setAuthName(profileName);
       setIsSupabaseAuthResolved(true);
+    };
+
+    void supabase.auth.getSession().then(({ data }) => {
+      void syncSession(data.session);
     });
 
     const { data: subscription } = supabase.auth.onAuthStateChange((_event, session) => {
-      setAuthEmail(session?.user.email ?? null);
-      setIsSupabaseAuthResolved(true);
+      void syncSession(session);
     });
 
     return () => {
@@ -63,7 +87,7 @@ function BuyerLayout() {
     if (!isSupabaseAuthResolved) return;
 
     if (!currentBuyer && authEmail) {
-      const result = signInBuyerByEmail(authEmail);
+      const result = signInBuyerByEmail(authEmail, authName);
 
       if (result.ok) return;
 
@@ -81,6 +105,7 @@ function BuyerLayout() {
     }
   }, [
     authEmail,
+    authName,
     currentBuyer,
     isSupabaseAuthResolved,
     isLegacyEntryPage,
@@ -107,6 +132,7 @@ function BuyerLayout() {
     { to: "/buyer/orders", label: "Orders", icon: PackageCheck },
     { to: "/buyer/invoices", label: "Invoices", icon: ReceiptText },
     { to: "/buyer/debt", label: "Debt", icon: WalletCards },
+    { to: "/buyer/settings", label: "Settings", icon: Settings },
   ];
 
   return (
@@ -114,7 +140,7 @@ function BuyerLayout() {
       <div className="mx-auto flex min-h-dvh w-full max-w-7xl flex-col bg-background">
         {currentBuyer && (
           <header className="fixed inset-x-0 top-0 z-50 border-b border-border/80 bg-background/90 backdrop-blur-xl">
-            <div className="mx-auto flex h-14 w-full max-w-7xl items-center gap-3 px-3 sm:h-16 sm:px-6 lg:px-8">
+            <div className="mx-auto flex h-16 w-full max-w-7xl items-center gap-3 px-3 sm:h-16 sm:px-6 lg:px-8">
               <Sheet>
                 <SheetTrigger asChild>
                   <Button
@@ -146,7 +172,7 @@ function BuyerLayout() {
                       </span>
                     </SheetTitle>
                     <SheetDescription className="text-sidebar-foreground/60">
-                      {currentBuyer.name} - {currentBuyer.market}
+                      {currentBuyer.name} - {currentBuyer.market || "Set market"}
                     </SheetDescription>
                   </SheetHeader>
 
@@ -199,23 +225,28 @@ function BuyerLayout() {
                   </div>
                 </SheetContent>
               </Sheet>
-              <div className="flex min-w-0 flex-1 items-center gap-2 md:hidden">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary">
+              <div className="flex min-w-0 flex-1 items-center gap-3 md:hidden">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary">
                   <Boxes className="h-5 w-5 text-sidebar-primary-foreground" />
                 </div>
-                <p className="truncate text-sm font-semibold">{state.shopName}</p>
+                <div className="min-w-0 leading-tight">
+                  <p className="truncate text-sm font-semibold">{state.shopName}</p>
+                  <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+                    <span className="truncate font-medium text-foreground/80">
+                      {currentBuyer.name}
+                    </span>
+                    <span className="shrink-0 text-muted-foreground/60">·</span>
+                    <span className="truncate">{currentBuyer.market || "Set market"}</span>
+                  </div>
+                </div>
               </div>
               <div className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary md:flex">
                 <Boxes className="h-5 w-5 text-sidebar-primary-foreground" />
               </div>
               <div className="hidden min-w-0 flex-1 md:block">
                 <p className="truncate text-sm font-semibold">{state.shopName}</p>
-                <p className="truncate text-xs text-muted-foreground">{currentBuyer.name}</p>
-              </div>
-              <div className="min-w-0 max-w-[42%] shrink-0 text-right leading-tight md:hidden">
-                <p className="truncate text-xs font-semibold">{currentBuyer.name}</p>
-                <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-                  {currentBuyer.market}
+                <p className="truncate text-xs text-muted-foreground">
+                  {currentBuyer.name} · {currentBuyer.market || "Set market"}
                 </p>
               </div>
               <nav className="hidden items-center gap-1 md:flex">
@@ -254,7 +285,7 @@ function BuyerLayout() {
           </header>
         )}
 
-        <main className={cn("flex-1", currentBuyer ? "pb-6 pt-14 sm:pt-16" : "")}>
+        <main className={cn("flex-1", currentBuyer ? "pb-6 pt-16" : "")}>
           <Outlet />
         </main>
       </div>

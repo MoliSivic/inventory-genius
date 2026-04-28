@@ -6,6 +6,7 @@ import {
   Plus,
   ReceiptText,
   Search,
+  Settings,
   ShoppingCart,
   WalletCards,
 } from "lucide-react";
@@ -143,6 +144,12 @@ function BuyerShopPage() {
   const placeOrder = () => {
     if (!currentBuyer) return;
 
+    if (!currentBuyer.market.trim()) {
+      toast.error("Choose your market in Settings before ordering.");
+      void navigate({ to: "/buyer/settings" });
+      return;
+    }
+
     const result = addBuyerOrder({
       buyerId: currentBuyer.id,
       items: cartItems.map((item) => ({
@@ -164,6 +171,29 @@ function BuyerShopPage() {
     toast.success(`Order sent: ${result.orderNumber}`);
     void navigate({ to: "/buyer/orders" });
   };
+
+  if (currentBuyer && !currentBuyer.market.trim()) {
+    return (
+      <div className="mx-auto w-full max-w-3xl px-3 py-3 sm:px-6 sm:py-4 lg:px-8">
+        <section className="rounded-md border border-border bg-card p-5 shadow-[var(--shadow-card)]">
+          <div className="flex h-12 w-12 items-center justify-center rounded-md bg-primary/10 text-primary">
+            <Settings className="h-6 w-6" />
+          </div>
+          <h1 className="mt-4 text-xl font-bold tracking-tight">Choose your market first</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            The seller delivers one market route at a time. Set your market in Settings so your
+            order goes to the correct truck route.
+          </p>
+          <Button
+            className="mt-5 w-full sm:w-auto"
+            onClick={() => void navigate({ to: "/buyer/settings" })}
+          >
+            Open Settings
+          </Button>
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto w-full max-w-7xl px-3 py-3 sm:px-6 sm:py-4 lg:px-8">
@@ -249,39 +279,51 @@ function BuyerShopPage() {
             currentBuyer && selectedUnit
               ? buyerVisiblePrice(state, currentBuyer.customerId, product.id, selectedUnit)
               : undefined;
+          const lineTotal = price ? price.price * quantity : undefined;
 
           return (
             <article
               key={product.id}
-              className="flex min-w-0 flex-col rounded-md border border-border bg-card p-3 shadow-[var(--shadow-card)]"
+              className="flex min-w-0 flex-col rounded-md border border-border bg-card p-2.5 shadow-[var(--shadow-card)]"
             >
-              <div className="flex flex-1 gap-3">
-                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-md bg-sidebar-primary/10 text-sidebar-primary">
-                  <Boxes className="h-6 w-6" />
+              <div className="flex flex-1 gap-2.5">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-sidebar-primary/10 text-sidebar-primary">
+                  <Boxes className="h-5 w-5" />
                 </div>
-                <div className="min-w-0 flex-1">
+                <div className="min-w-0 flex-1 space-y-1.5">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <h2 className="line-clamp-2 text-sm font-semibold leading-snug">
+                      <h2 className="line-clamp-2 text-sm font-semibold leading-tight">
                         {product.name}
                       </h2>
-                      <p className="mt-1 text-xs text-muted-foreground">{product.category}</p>
+                      <p className="truncate text-xs text-muted-foreground">{product.category}</p>
                     </div>
-                    <p className="shrink-0 text-right text-base font-bold">
-                      {price === undefined ? "Confirm" : fmtMoney(price.price)}
-                    </p>
+                    <div className="shrink-0 text-right">
+                      <p className="text-base font-bold">
+                        {lineTotal !== undefined && quantity > 0
+                          ? fmtMoney(lineTotal)
+                          : price === undefined
+                            ? "Confirm"
+                            : fmtMoney(price.price)}
+                      </p>
+                      {price && quantity > 0 && (
+                        <p className="mt-0.5 text-[11px] font-medium text-muted-foreground">
+                          {quantity} x {fmtMoney(price.price)}
+                        </p>
+                      )}
+                    </div>
                   </div>
-                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                    <span className="rounded-full bg-success/15 px-2 py-1 font-medium text-success">
+                  <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                    <span className="rounded-full bg-success/15 px-2 py-0.5 font-medium text-success">
                       {maxQuantity} {selectedUnit}
                     </span>
                     {price && (
-                      <span className="rounded-full bg-muted px-2 py-1 font-medium text-muted-foreground">
+                      <span className="rounded-full bg-muted px-2 py-0.5 font-medium text-muted-foreground">
                         {priceSourceLabels[price.source]}
                       </span>
                     )}
                     {price === undefined && (
-                      <span className="rounded-full bg-warning/20 px-2 py-1 font-medium text-warning-foreground">
+                      <span className="rounded-full bg-warning/20 px-2 py-0.5 font-medium text-warning-foreground">
                         Price confirm
                       </span>
                     )}
@@ -289,12 +331,12 @@ function BuyerShopPage() {
                 </div>
               </div>
 
-              <div className="mt-3 grid grid-cols-1 items-center gap-3 min-[420px]:grid-cols-[1fr_auto]">
+              <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
                 <Select
                   value={selectedUnit}
                   onValueChange={(value) => handleUnitChange(product, value as UnitType)}
                 >
-                  <SelectTrigger className="h-11">
+                  <SelectTrigger className="h-10 min-w-0">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -311,7 +353,7 @@ function BuyerShopPage() {
                     type="button"
                     variant="ghost"
                     size="icon"
-                    className="h-11 w-11"
+                    className="h-10 w-10"
                     onClick={() =>
                       selectedUnit && setCartQuantity(product, selectedUnit, quantity - 1)
                     }
@@ -320,12 +362,12 @@ function BuyerShopPage() {
                   >
                     <Minus className="h-4 w-4" />
                   </Button>
-                  <div className="w-12 text-center text-base font-semibold">{quantity}</div>
+                  <div className="w-9 text-center text-base font-semibold">{quantity}</div>
                   <Button
                     type="button"
                     variant="ghost"
                     size="icon"
-                    className="h-11 w-11"
+                    className="h-10 w-10"
                     onClick={() =>
                       selectedUnit && setCartQuantity(product, selectedUnit, quantity + 1)
                     }

@@ -62,6 +62,7 @@ export interface BuyerAccount {
   passwordDigest: string;
   name: string;
   phone?: string;
+  telegram?: string;
   market: string;
   location: string;
   customerId: string;
@@ -102,6 +103,7 @@ export interface Sale {
   receiptNumber: string;
   customerId: string;
   date: string;
+  archivedAt?: string;
   items: SaleItem[];
   total: number;
   estimatedProfit: number;
@@ -129,10 +131,13 @@ export interface BuyerOrder {
   date: string;
   updatedAt: string;
   status: BuyerOrderStatus;
+  paymentStatus: PaymentStatus;
+  paidAmount: number;
   items: BuyerOrderItem[];
   totalEstimate: number;
   notes?: string;
   sellerNote?: string;
+  saleId?: string;
 }
 
 export interface CustomerPrice {
@@ -152,6 +157,7 @@ export interface Payment {
 }
 
 export interface AppState {
+  shopEmail?: string;
   categories: ProductCategory[];
   markets: string[];
   products: Product[];
@@ -165,4 +171,5 @@ export interface AppState {
   customerPrices: CustomerPrice[];
   payments: Payment[];
   shopName: string;
+  shopTelegram?: string;
 }

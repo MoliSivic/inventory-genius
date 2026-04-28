@@ -18,6 +18,7 @@ import type {
   CustomerPrice,
   Factory,
   Payment,
+  PaymentStatus,
   Product,
   ProductCategory,
   ProductCostLayer,
@@ -39,7 +40,7 @@ import {
   resolveSaleItemUnit,
   shouldLimitSaleSubUnitToSingleStockUnit,
 } from "./sale-units";
-import { normalizeTelegramValue } from "./telegram";
+import { getTelegramUrl, normalizeTelegramValue } from "./telegram";
 import { formatUnits, normalizeProductUnits, primaryUnit } from "./units";
 import {
   canSyncRemoteState,
@@ -88,6 +89,7 @@ const BUYER_ORDER_STATUSES = new Set<BuyerOrderStatus>([
   "completed",
   "cancelled",
 ]);
+const PAYMENT_STATUSES = new Set<PaymentStatus>(["paid", "unpaid", "partial"]);
 
 type StoreResult = { ok: true } | { ok: false; error: string };
 
@@ -520,41 +522,52 @@ function normalizeBuyerAccounts(buyers: BuyerAccount[]) {
         market: normalizeMarketName(buyer.market),
         location: buyer.location.trim(),
         phone: buyer.phone?.trim() || undefined,
+        telegram: buyer.telegram ? normalizeTelegramValue(buyer.telegram) : undefined,
         customerId:
           buyer.id === "buyer_demo" && email === "customer@gmail.com" ? "c1" : buyer.customerId,
       };
     })
     .filter(
-      (buyer) =>
-        buyer.id &&
-        buyer.email &&
-        buyer.passwordDigest &&
-        buyer.name &&
-        buyer.market &&
-        buyer.customerId,
+      (buyer) => buyer.id && buyer.email && buyer.passwordDigest && buyer.name && buyer.customerId,
     );
 }
 
 function normalizeBuyerOrders(orders: BuyerOrder[]) {
   return orders
-    .map((order) => ({
-      ...order,
-      status: BUYER_ORDER_STATUSES.has(order.status) ? order.status : ("pending" as const),
-      totalEstimate: Number(Math.max(order.totalEstimate ?? 0, 0).toFixed(2)),
-      items: Array.isArray(order.items)
-        ? order.items
-            .map((item) => ({
-              ...item,
-              quantity: Number(Math.max(item.quantity ?? 0, 0)),
-              stockQuantity: Number(Math.max(item.stockQuantity ?? 0, 0)),
-              estimatedUnitPrice:
-                item.estimatedUnitPrice === undefined
-                  ? undefined
-                  : Number(Math.max(item.estimatedUnitPrice, 0).toFixed(2)),
-            }))
-            .filter((item) => item.productId && item.quantity > 0 && item.stockQuantity > 0)
-        : [],
-    }))
+    .map((order) => {
+      const totalEstimate = Number(Math.max(order.totalEstimate ?? 0, 0).toFixed(2));
+      const paidAmount = Number(
+        Math.min(Math.max(order.paidAmount ?? 0, 0), totalEstimate).toFixed(2),
+      );
+      const paymentStatus = PAYMENT_STATUSES.has(order.paymentStatus)
+        ? order.paymentStatus
+        : paidAmount <= 0
+          ? "unpaid"
+          : paidAmount >= totalEstimate
+            ? "paid"
+            : "partial";
+
+      return {
+        ...order,
+        status: BUYER_ORDER_STATUSES.has(order.status) ? order.status : ("pending" as const),
+        paymentStatus,
+        paidAmount,
+        totalEstimate,
+        items: Array.isArray(order.items)
+          ? order.items
+              .map((item) => ({
+                ...item,
+                quantity: Number(Math.max(item.quantity ?? 0, 0)),
+                stockQuantity: Number(Math.max(item.stockQuantity ?? 0, 0)),
+                estimatedUnitPrice:
+                  item.estimatedUnitPrice === undefined
+                    ? undefined
+                    : Number(Math.max(item.estimatedUnitPrice, 0).toFixed(2)),
+              }))
+              .filter((item) => item.productId && item.quantity > 0 && item.stockQuantity > 0)
+          : [],
+      };
+    })
     .filter((order) => order.id && order.buyerId && order.customerId && order.items.length > 0);
 }
 
@@ -1068,14 +1081,26 @@ interface StoreContextValue {
     location: string;
   }) => { ok: true; buyer: BuyerAccount } | { ok: false; error: string };
   signInBuyer: (email: string, password: string) => StoreResult;
-  signInBuyerByEmail: (email: string) => StoreResult;
+  signInBuyerByEmail: (email: string, name?: string | null) => StoreResult;
   signOutBuyer: () => void;
+  updateBuyerProfile: (data: {
+    name: string;
+    phone?: string;
+    telegram?: string;
+    market: string;
+    location?: string;
+  }) => StoreResult;
   addBuyerOrder: (data: {
     buyerId: string;
     items: Array<{ productId: string; quantity: number; unit?: SaleItem["unit"] }>;
     notes?: string;
   }) => BuyerOrder | { error: string };
   updateBuyerOrderStatus: (orderId: string, status: BuyerOrderStatus, sellerNote?: string) => void;
+  updateBuyerOrderPayment: (
+    orderId: string,
+    paymentStatus: PaymentStatus,
+    paidAmount?: number,
+  ) => void;
   setCustomerProductPrices: (
     customerId: string,
     entries: Array<{
@@ -1117,8 +1142,10 @@ interface StoreContextValue {
     },
   ) => Sale | { error: string };
   updateSaleTelegram: (saleId: string, status: Sale["telegramStatus"]) => void;
+  updateSaleArchive: (saleId: string, archived: boolean) => void;
   recordPayment: (p: Omit<Payment, "id">) => void;
   setShopName: (name: string) => void;
+  setShopContact: (contact: { email?: string; telegram?: string }) => StoreResult;
 }
 
 const StoreContext = createContext<StoreContextValue | null>(null);
@@ -1670,11 +1697,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return result;
   }, []);
 
-  const signInBuyerByEmail: StoreContextValue["signInBuyerByEmail"] = useCallback((email) => {
+  const signInBuyerByEmail: StoreContextValue["signInBuyerByEmail"] = useCallback((email, name) => {
     let result: StoreResult = { ok: false, error: "Enter a valid email address." };
 
     setState((s) => {
       const normalizedEmail = normalizeEmail(email);
+      const displayName = name?.trim() || nameFromEmail(normalizedEmail);
 
       if (!normalizedEmail || !normalizedEmail.includes("@")) {
         result = { ok: false, error: "Enter a valid email address." };
@@ -1685,21 +1713,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
       if (buyer) {
         result = { ok: true };
-        return { ...s, buyerSessionId: buyer.id };
+        if (buyer.name === displayName) {
+          return { ...s, buyerSessionId: buyer.id };
+        }
+
+        return {
+          ...s,
+          buyerAccounts: s.buyerAccounts.map((account) =>
+            account.id === buyer.id ? { ...account, name: displayName } : account,
+          ),
+          customers: s.customers.map((customer) =>
+            customer.id === buyer.customerId ? { ...customer, name: displayName } : customer,
+          ),
+          buyerSessionId: buyer.id,
+        };
       }
 
-      const marketName = normalizeMarketName(s.markets[0] ?? FALLBACK_MARKET_NAME);
-      const marketExists = s.markets.some((market) => sameMarketName(market, marketName));
       const customerId = uid("c");
       const now = todayIsoString();
-      const displayName = nameFromEmail(normalizedEmail);
       const newBuyer: BuyerAccount = {
         id: uid("buyer"),
         email: normalizedEmail,
         passwordDigest: getBuyerPasswordDigest(`supabase-auth-${normalizedEmail}`),
         name: displayName,
-        market: marketName,
-        location: "Online account",
+        market: "",
+        location: "",
         customerId,
         createdAt: now,
       };
@@ -1707,7 +1745,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         id: customerId,
         name: displayName,
         phone: "",
-        market: marketName,
+        market: "",
         type: "Buyer App",
         notes: `Supabase customer account: ${normalizedEmail}`,
       };
@@ -1715,7 +1753,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       result = { ok: true };
       return {
         ...s,
-        markets: marketExists ? s.markets : [...s.markets, marketName],
         customers: [...s.customers, customer],
         buyerAccounts: [...s.buyerAccounts, newBuyer],
         buyerSessionId: newBuyer.id,
@@ -1729,6 +1766,78 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setState((s) => ({ ...s, buyerSessionId: undefined }));
   }, []);
 
+  const updateBuyerProfile: StoreContextValue["updateBuyerProfile"] = useCallback((data) => {
+    let result: StoreResult = { ok: false, error: "Unknown error" };
+
+    setState((s) => {
+      const buyer = s.buyerAccounts.find((account) => account.id === s.buyerSessionId);
+      if (!buyer) {
+        result = { ok: false, error: "Please sign in again." };
+        return s;
+      }
+
+      const name = data.name.trim();
+      const phone = data.phone?.trim() || undefined;
+      const telegram = data.telegram?.trim() ? normalizeTelegramValue(data.telegram) : undefined;
+      const location = data.location?.trim() ?? "";
+      const marketName = normalizeMarketName(data.market);
+
+      if (!name) {
+        result = { ok: false, error: "Name is required." };
+        return s;
+      }
+
+      if (!marketName) {
+        result = { ok: false, error: "Choose your market before ordering." };
+        return s;
+      }
+
+      const matchedMarket = s.markets.find((market) => sameMarketName(market, marketName));
+      if (!matchedMarket) {
+        result = { ok: false, error: "Choose a market from the seller list." };
+        return s;
+      }
+
+      if (telegram && !getTelegramUrl(telegram)) {
+        result = { ok: false, error: "Enter a valid Telegram username or link." };
+        return s;
+      }
+
+      result = { ok: true };
+      return {
+        ...s,
+        buyerAccounts: s.buyerAccounts.map((account) =>
+          account.id === buyer.id
+            ? {
+                ...account,
+                name,
+                phone,
+                telegram,
+                market: matchedMarket,
+                location,
+              }
+            : account,
+        ),
+        customers: s.customers.map((customer) =>
+          customer.id === buyer.customerId
+            ? {
+                ...customer,
+                name,
+                phone: phone ?? "",
+                telegram,
+                market: matchedMarket,
+                notes: location
+                  ? `Supabase customer account: ${buyer.email}. Location: ${location}`
+                  : customer.notes,
+              }
+            : customer,
+        ),
+      };
+    });
+
+    return result;
+  }, []);
+
   const addBuyerOrder: StoreContextValue["addBuyerOrder"] = useCallback((data) => {
     let result: BuyerOrder | { error: string } = { error: "Unknown error" };
 
@@ -1736,6 +1845,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const buyer = s.buyerAccounts.find((account) => account.id === data.buyerId);
       if (!buyer) {
         result = { error: "Please sign in again." };
+        return s;
+      }
+
+      if (!normalizeMarketName(buyer.market)) {
+        result = { error: "Choose your market in Settings before ordering." };
         return s;
       }
 
@@ -1801,6 +1915,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         date: now,
         updatedAt: now,
         status: "pending",
+        paymentStatus: "unpaid",
+        paidAmount: 0,
         items: orderItems,
         totalEstimate: Number(totalEstimate.toFixed(2)),
         notes: data.notes?.trim() || undefined,
@@ -1827,6 +1943,35 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               }
             : order,
         ),
+      }));
+    },
+    [],
+  );
+
+  const updateBuyerOrderPayment: StoreContextValue["updateBuyerOrderPayment"] = useCallback(
+    (orderId, paymentStatus, paidAmount) => {
+      setState((s) => ({
+        ...s,
+        buyerOrders: s.buyerOrders.map((order) => {
+          if (order.id !== orderId) return order;
+
+          const total = Number(Math.max(order.totalEstimate, 0).toFixed(2));
+          const nextPaid =
+            paymentStatus === "paid"
+              ? total
+              : paymentStatus === "unpaid"
+                ? 0
+                : Math.min(Math.max(paidAmount ?? order.paidAmount ?? 0, 0), total);
+          const nextPaymentStatus =
+            nextPaid <= 0 ? "unpaid" : nextPaid >= total ? "paid" : paymentStatus;
+
+          return {
+            ...order,
+            paymentStatus: nextPaymentStatus,
+            paidAmount: Number(nextPaid.toFixed(2)),
+            updatedAt: todayIsoString(),
+          };
+        }),
       }));
     },
     [],
@@ -2162,6 +2307,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const updateSaleArchive: StoreContextValue["updateSaleArchive"] = useCallback(
+    (saleId, archived) => {
+      setState((s) => ({
+        ...s,
+        sales: s.sales.map((sale) =>
+          sale.id === saleId
+            ? { ...sale, archivedAt: archived ? (sale.archivedAt ?? todayIsoString()) : undefined }
+            : sale,
+        ),
+      }));
+    },
+    [],
+  );
+
   const recordPayment: StoreContextValue["recordPayment"] = useCallback((p) => {
     setState((s) => {
       const payments = [...s.payments, { ...p, id: uid("pay") }];
@@ -2181,6 +2340,29 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const setShopName = useCallback((name: string) => {
     setState((s) => ({ ...s, shopName: name }));
+  }, []);
+
+  const setShopContact: StoreContextValue["setShopContact"] = useCallback((contact) => {
+    const email = contact.email?.trim() ?? "";
+    const telegram = contact.telegram?.trim()
+      ? normalizeTelegramValue(contact.telegram)
+      : undefined;
+
+    if (email && !email.includes("@")) {
+      return { ok: false, error: "Enter a valid seller email address." };
+    }
+
+    if (telegram && !getTelegramUrl(telegram)) {
+      return { ok: false, error: "Enter a valid Telegram username or link." };
+    }
+
+    setState((s) => ({
+      ...s,
+      shopEmail: email || undefined,
+      shopTelegram: telegram,
+    }));
+
+    return { ok: true };
   }, []);
 
   const currentBuyer = useMemo(
@@ -2211,16 +2393,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       signInBuyer,
       signInBuyerByEmail,
       signOutBuyer,
+      updateBuyerProfile,
       addBuyerOrder,
       updateBuyerOrderStatus,
+      updateBuyerOrderPayment,
       setCustomerProductPrices,
       addStockIn,
       updateStockIn,
       addSale,
       updateSale,
       updateSaleTelegram,
+      updateSaleArchive,
       recordPayment,
       setShopName,
+      setShopContact,
     }),
     [
       state,
@@ -2244,16 +2430,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       signInBuyer,
       signInBuyerByEmail,
       signOutBuyer,
+      updateBuyerProfile,
       addBuyerOrder,
       updateBuyerOrderStatus,
+      updateBuyerOrderPayment,
       setCustomerProductPrices,
       addStockIn,
       updateStockIn,
       addSale,
       updateSale,
       updateSaleTelegram,
+      updateSaleArchive,
       recordPayment,
       setShopName,
+      setShopContact,
     ],
   );
 

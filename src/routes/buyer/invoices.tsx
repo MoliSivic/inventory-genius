@@ -1,17 +1,33 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { ReceiptText } from "lucide-react";
+import { usePersistedState } from "@/hooks/usePersistedState";
 import { StatusBadge } from "@/components/app/StatCard";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { fmtMoney, formatUnits, useStore } from "@/lib/store";
 
 export const Route = createFileRoute("/buyer/invoices")({
   component: BuyerInvoicesPage,
 });
 
+type ArchiveFilter = "active" | "archived" | "all";
+
 function BuyerInvoicesPage() {
   const { state, currentBuyer } = useStore();
-  const invoices = state.sales
+  const [archiveFilter, setArchiveFilter] = usePersistedState<ArchiveFilter>(
+    "buyer_invoice_archive_filter",
+    "active",
+  );
+  const allCustomerInvoices = state.sales
     .filter((sale) => sale.customerId === currentBuyer?.customerId)
     .sort((left, right) => right.date.localeCompare(left.date));
+  const invoices = allCustomerInvoices.filter((sale) => {
+    const isArchived = Boolean(sale.archivedAt);
+    if (archiveFilter === "active") return !isArchived;
+    if (archiveFilter === "archived") return isArchived;
+    return true;
+  });
+  const archivedCount = allCustomerInvoices.filter((sale) => sale.archivedAt).length;
   const totalInvoiced = invoices.reduce((sum, sale) => sum + sale.total, 0);
   const totalPaid = invoices.reduce((sum, sale) => sum + sale.paidAmount, 0);
   const totalBalance = invoices.reduce(
@@ -26,6 +42,37 @@ function BuyerInvoicesPage() {
         <p className="mt-1 text-sm text-muted-foreground">
           {invoices.length} receipts from {state.shopName}
         </p>
+      </div>
+
+      <div className="mb-4 flex gap-2 overflow-x-auto pb-1">
+        <Button
+          type="button"
+          size="sm"
+          variant={archiveFilter === "active" ? "default" : "outline"}
+          className="rounded-full"
+          onClick={() => setArchiveFilter("active")}
+        >
+          Active
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant={archiveFilter === "archived" ? "default" : "outline"}
+          className="rounded-full"
+          onClick={() => setArchiveFilter("archived")}
+        >
+          Archived
+          {archivedCount > 0 ? ` (${archivedCount})` : ""}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant={archiveFilter === "all" ? "default" : "outline"}
+          className="rounded-full"
+          onClick={() => setArchiveFilter("all")}
+        >
+          All
+        </Button>
       </div>
 
       <div className="mb-4 grid grid-cols-3 gap-2 sm:gap-3">
@@ -52,6 +99,11 @@ function BuyerInvoicesPage() {
                 </div>
                 <StatusBadge status={sale.paymentStatus} />
               </div>
+              {sale.archivedAt && (
+                <Badge className="mt-3 border-transparent bg-muted text-muted-foreground">
+                  Archived
+                </Badge>
+              )}
 
               <div className="mt-3 grid grid-cols-3 gap-2 rounded-md bg-muted p-3 text-sm">
                 <MoneyLine label="Total" value={sale.total} />
@@ -90,7 +142,9 @@ function BuyerInvoicesPage() {
         {invoices.length === 0 && (
           <div className="rounded-md border border-border bg-card p-8 text-center lg:col-span-2">
             <ReceiptText className="mx-auto h-9 w-9 text-muted-foreground" />
-            <p className="mt-3 text-sm font-medium">No invoices yet</p>
+            <p className="mt-3 text-sm font-medium">
+              {archiveFilter === "archived" ? "No archived invoices" : "No invoices yet"}
+            </p>
             <p className="mt-1 text-xs text-muted-foreground">
               Confirmed sales from the seller will appear here.
             </p>

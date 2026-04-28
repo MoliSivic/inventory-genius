@@ -110,6 +110,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const [isAuthResolved, setIsAuthResolved] = useState(false);
   const isAuthPage = location.pathname.startsWith("/auth");
   const isBuyerPage = location.pathname.startsWith("/buyer");
+  const pendingBuyerOrdersCount = state.buyerOrders.filter(
+    (order) => order.status === "pending",
+  ).length;
 
   useEffect(() => {
     if (isSupabaseReady) {
@@ -336,6 +339,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
                     ? location.pathname === item.to
                     : location.pathname.startsWith(item.to);
                   const Icon = item.icon;
+                  const notificationCount = item.to === "/orders" ? pendingBuyerOrdersCount : 0;
+                  const notificationLabel =
+                    notificationCount > 99 ? "99+" : String(notificationCount);
 
                   return (
                     <Link
@@ -350,7 +356,20 @@ export function AppLayout({ children }: { children: ReactNode }) {
                       )}
                     >
                       <Icon className="h-4 w-4 shrink-0" />
-                      <span className="truncate">{item.label}</span>
+                      <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                      {notificationCount > 0 && (
+                        <span
+                          className={cn(
+                            "ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 text-[11px] font-bold leading-none",
+                            active
+                              ? "bg-sidebar-primary-foreground/20 text-sidebar-primary-foreground ring-1 ring-sidebar-primary-foreground/25"
+                              : "bg-warning/95 text-warning-foreground shadow-sm",
+                          )}
+                          aria-label={`${notificationCount} pending buyer orders`}
+                        >
+                          {notificationLabel}
+                        </span>
+                      )}
                     </Link>
                   );
                 })}

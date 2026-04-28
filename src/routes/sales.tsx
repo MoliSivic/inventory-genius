@@ -1,7 +1,18 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { usePersistedState } from "@/hooks/usePersistedState";
-import { Plus, Trash2, Send, Printer, Download, Search, X, Pencil } from "lucide-react";
+import {
+  Archive,
+  Download,
+  Pencil,
+  Plus,
+  Printer,
+  RotateCcw,
+  Search,
+  Send,
+  Trash2,
+  X,
+} from "lucide-react";
 import { useStore, fmtMoney, suggestedPrice } from "@/lib/store";
 import { normalizeCategories } from "@/lib/categories";
 import {
@@ -46,9 +57,10 @@ interface Row {
 const ALL = "all";
 
 type ViewMode = "sale" | "receipt";
+type ArchiveFilter = "active" | "archived" | "all";
 
 function SalesPage() {
-  const { state, addSale, updateSale, updateSaleTelegram } = useStore();
+  const { state, addSale, updateSale, updateSaleArchive, updateSaleTelegram } = useStore();
   const [viewMode, setViewMode] = usePersistedState<ViewMode>("sales_viewMode", "sale");
   const [marketFilter, setMarketFilter] = usePersistedState("sales_marketFilter", "all");
   const [customerId, setCustomerId] = useState("");
@@ -79,6 +91,7 @@ function SalesPage() {
 
   // Recent sales filters
   const [rsSearch, setRsSearch] = usePersistedState("sales_rsSearch", "");
+  const [rsArchive, setRsArchive] = usePersistedState<ArchiveFilter>("sales_rsArchive", "active");
   const [rsMarket, setRsMarket] = usePersistedState("sales_rsMarket", "all");
   const [rsCustomer, setRsCustomer] = usePersistedState("sales_rsCustomer", "all");
   const [rsStatus, setRsStatus] = usePersistedState<"all" | PaymentStatus>("sales_rsStatus", "all");
@@ -91,6 +104,9 @@ function SalesPage() {
   const recentSales = useMemo(() => {
     const customerById = new Map(state.customers.map((c) => [c.id, c]));
     const list = state.sales.filter((s) => {
+      const isArchived = Boolean(s.archivedAt);
+      if (rsArchive === "active" && isArchived) return false;
+      if (rsArchive === "archived" && !isArchived) return false;
       const c = customerById.get(s.customerId);
       if (rsMarket !== "all" && c?.market !== rsMarket) return false;
       if (rsCustomer !== "all" && s.customerId !== rsCustomer) return false;
@@ -124,6 +140,7 @@ function SalesPage() {
     state.sales,
     state.customers,
     rsSearch,
+    rsArchive,
     rsMarket,
     rsCustomer,
     rsStatus,
@@ -149,6 +166,7 @@ function SalesPage() {
 
   const clearRsFilters = () => {
     setRsSearch("");
+    setRsArchive("active");
     setRsMarket("all");
     setRsCustomer("all");
     setRsStatus("all");
@@ -314,6 +332,17 @@ function SalesPage() {
 
   const customer = state.customers.find((c) => c.id === customerId);
 
+  const toggleArchiveSale = (sale: Sale, archived: boolean) => {
+    updateSaleArchive(sale.id, archived);
+    if (generated?.id === sale.id) {
+      setGenerated({
+        ...sale,
+        archivedAt: archived ? (sale.archivedAt ?? new Date().toISOString()) : undefined,
+      });
+    }
+    toast.success(archived ? `${sale.receiptNumber} archived` : `${sale.receiptNumber} restored`);
+  };
+
   return (
     <div>
       <PageHeader
@@ -401,143 +430,81 @@ function SalesPage() {
             </div>
           </div>
 
-          <div className="overflow-x-auto -mx-5 pt-2 pb-3">
-            <table className="w-full text-sm min-w-[1000px]">
-              <thead>
-                <tr className="text-left text-xs uppercase text-muted-foreground border-b border-border">
-                  <th className="px-5 py-2 font-medium w-12">No.</th>
-                  <th className="px-5 py-2 font-medium w-40">Category</th>
-                  <th className="px-5 py-2 font-medium w-[340px]">Product</th>
-                  <th className="px-5 py-2 font-medium w-36">Stock</th>
-                  <th className="px-5 py-2 font-medium w-20">Cost</th>
-                  <th className="px-5 py-2 font-medium w-28">Qty</th>
-                  <th className="px-5 py-2 font-medium w-24">Unit</th>
-                  <th className="px-5 py-2 font-medium w-28">Price</th>
-                  <th className="px-5 py-2 font-medium text-right w-28">Subtotal</th>
-                  <th className="px-5 py-2 w-12"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r, i) => {
-                  const productOptions = state.products.filter(
-                    (pp) => r.category === ALL || pp.category === r.category,
-                  );
-                  const p = state.products.find((x) => x.id === r.productId);
-                  const unitOptions = p ? getProductSaleUnitOptions(p) : [];
-                  const hasMultipleUnits = unitOptions.length > 1;
-                  const stockUnit = p ? primaryUnit(p.unit) : undefined;
-                  const stockSubUnitTotals =
-                    p && unitOptions.length > 1
-                      ? unitOptions.slice(1).map((unitOption) => ({
-                          unit: unitOption.unit,
-                          quantity: convertStockQuantityToSaleQuantity(p, p.stock, unitOption.unit),
-                        }))
-                      : [];
-                  const stockSummary = p
-                    ? [
-                        `${p.stock} ${stockUnit}`,
-                        ...stockSubUnitTotals.map(
-                          (subUnitTotal) => `(${subUnitTotal.quantity} ${subUnitTotal.unit})`,
-                        ),
-                      ].join(" ")
-                    : "—";
-                  const sug =
-                    customerId && r.productId
-                      ? suggestedPrice(state, customerId, r.productId, r.saleUnit)
-                      : undefined;
-                  const costPerUnit = p
-                    ? convertStockUnitPriceToSaleUnitPrice(p, p.avgCost, r.saleUnit)
-                    : 0;
-                  return (
-                    <tr key={i} className="border-b border-border/60 last:border-0">
-                      <td className="px-5 py-3 text-xs font-medium text-muted-foreground align-middle">
-                        {i + 1}
-                      </td>
-                      <td className="px-5 py-3 align-middle">
-                        <Select
-                          value={r.category}
-                          onValueChange={(v) => {
-                            setRows((rs) =>
-                              rs.map((row, idx) => {
-                                if (idx !== i) return row;
-                                const currentProduct = state.products.find(
-                                  (pp) => pp.id === row.productId,
-                                );
-                                const keepProduct =
-                                  currentProduct && (v === ALL || currentProduct.category === v);
-                                return {
-                                  ...row,
-                                  category: v,
-                                  productId: keepProduct ? row.productId : "",
-                                  saleUnit: keepProduct ? row.saleUnit : undefined,
-                                  unitPrice: keepProduct ? row.unitPrice : 0,
-                                };
-                              }),
-                            );
-                          }}
-                        >
-                          <SelectTrigger className="h-10">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value={ALL}>All categories</SelectItem>
-                            {categoryOptions.map((c) => (
-                              <SelectItem key={c} value={c}>
-                                {c}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </td>
-                      <td className="px-5 py-3 align-middle">
-                        <Select
-                          value={r.productId}
-                          onValueChange={(v) => updateRow(i, { productId: v })}
-                        >
-                          <SelectTrigger className="h-10 w-[320px] max-w-full">
-                            <SelectValue placeholder="Select product" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {productOptions.map((pp) => (
-                              <SelectItem key={pp.id} value={pp.id}>
-                                {pp.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </td>
-                      <td className="px-5 py-3 text-xs align-middle whitespace-nowrap">
-                        <span className="font-medium">{stockSummary}</span>
-                      </td>
-                      <td className="px-5 py-3 text-xs align-middle whitespace-nowrap">
-                        {p ? fmtMoney(costPerUnit) : "—"}
-                      </td>
-                      <td className="px-5 py-3 align-middle">
-                        <Input
-                          className="h-10 text-right"
-                          type="number"
-                          min={0}
-                          value={r.quantity}
-                          onChange={(e) => updateRow(i, { quantity: Number(e.target.value) })}
-                        />
-                      </td>
-                      <td className="px-5 py-3 align-middle">
-                        {hasMultipleUnits ? (
+          <div className="overflow-hidden rounded-lg border border-border bg-background">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[1000px] text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-muted/20 text-left text-xs uppercase text-muted-foreground">
+                    <th className="w-12 px-5 py-2 font-medium">No.</th>
+                    <th className="w-40 px-5 py-2 font-medium">Category</th>
+                    <th className="w-[340px] px-5 py-2 font-medium">Product</th>
+                    <th className="w-36 px-5 py-2 font-medium">Stock</th>
+                    <th className="w-20 px-5 py-2 font-medium">Cost</th>
+                    <th className="w-28 px-5 py-2 font-medium">Qty</th>
+                    <th className="w-24 px-5 py-2 font-medium">Unit</th>
+                    <th className="w-28 px-5 py-2 font-medium">Price</th>
+                    <th className="w-28 px-5 py-2 text-right font-medium">Subtotal</th>
+                    <th className="w-12 px-5 py-2"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r, i) => {
+                    const productOptions = state.products.filter(
+                      (pp) => r.category === ALL || pp.category === r.category,
+                    );
+                    const p = state.products.find((x) => x.id === r.productId);
+                    const unitOptions = p ? getProductSaleUnitOptions(p) : [];
+                    const hasMultipleUnits = unitOptions.length > 1;
+                    const stockUnit = p ? primaryUnit(p.unit) : undefined;
+                    const stockSubUnitTotals =
+                      p && unitOptions.length > 1
+                        ? unitOptions.slice(1).map((unitOption) => ({
+                            unit: unitOption.unit,
+                            quantity: convertStockQuantityToSaleQuantity(
+                              p,
+                              p.stock,
+                              unitOption.unit,
+                            ),
+                          }))
+                        : [];
+                    const stockSummary = p
+                      ? [
+                          `${p.stock} ${stockUnit}`,
+                          ...stockSubUnitTotals.map(
+                            (subUnitTotal) => `(${subUnitTotal.quantity} ${subUnitTotal.unit})`,
+                          ),
+                        ].join(" ")
+                      : "—";
+                    const sug =
+                      customerId && r.productId
+                        ? suggestedPrice(state, customerId, r.productId, r.saleUnit)
+                        : undefined;
+                    const costPerUnit = p
+                      ? convertStockUnitPriceToSaleUnitPrice(p, p.avgCost, r.saleUnit)
+                      : 0;
+                    return (
+                      <tr key={i} className="border-b border-border/60 last:border-0">
+                        <td className="px-5 py-3 align-middle text-xs font-medium text-muted-foreground">
+                          {i + 1}
+                        </td>
+                        <td className="px-5 py-3 align-middle">
                           <Select
-                            value={r.saleUnit ?? primaryUnit(p!.unit)}
+                            value={r.category}
                             onValueChange={(v) => {
-                              const newUnit = v as UnitType;
                               setRows((rs) =>
                                 rs.map((row, idx) => {
                                   if (idx !== i) return row;
-                                  // Try to get suggested price for new unit
-                                  const newSug = customerId
-                                    ? suggestedPrice(state, customerId, row.productId, newUnit)
-                                    : undefined;
+                                  const currentProduct = state.products.find(
+                                    (pp) => pp.id === row.productId,
+                                  );
+                                  const keepProduct =
+                                    currentProduct && (v === ALL || currentProduct.category === v);
                                   return {
                                     ...row,
-                                    saleUnit: newUnit,
-                                    unitPrice: newSug ?? row.unitPrice,
+                                    category: v,
+                                    productId: keepProduct ? row.productId : "",
+                                    saleUnit: keepProduct ? row.saleUnit : undefined,
+                                    unitPrice: keepProduct ? row.unitPrice : 0,
                                   };
                                 }),
                               );
@@ -547,63 +514,131 @@ function SalesPage() {
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              {unitOptions.map((opt) => (
-                                <SelectItem key={opt.unit} value={opt.unit}>
-                                  {opt.unit}
+                              <SelectItem value={ALL}>All categories</SelectItem>
+                              {categoryOptions.map((c) => (
+                                <SelectItem key={c} value={c}>
+                                  {c}
                                 </SelectItem>
                               ))}
                             </SelectContent>
                           </Select>
-                        ) : (
-                          <span className="text-xs font-medium whitespace-nowrap">
-                            {p ? primaryUnit(p.unit) : "—"}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-5 py-3 align-middle">
-                        <div className="flex items-center gap-2">
+                        </td>
+                        <td className="px-5 py-3 align-middle">
+                          <Select
+                            value={r.productId}
+                            onValueChange={(v) => updateRow(i, { productId: v })}
+                          >
+                            <SelectTrigger className="h-10 w-[320px] max-w-full">
+                              <SelectValue placeholder="Select product" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {productOptions.map((pp) => (
+                                <SelectItem key={pp.id} value={pp.id}>
+                                  {pp.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </td>
+                        <td className="whitespace-nowrap px-5 py-3 align-middle text-xs">
+                          <span className="font-medium">{stockSummary}</span>
+                        </td>
+                        <td className="whitespace-nowrap px-5 py-3 align-middle text-xs">
+                          {p ? fmtMoney(costPerUnit) : "—"}
+                        </td>
+                        <td className="px-5 py-3 align-middle">
                           <Input
-                            className="h-10 w-28 text-right"
+                            className="h-10 text-right"
                             type="number"
-                            step="0.01"
                             min={0}
-                            value={r.unitPrice}
-                            onChange={(e) => updateRow(i, { unitPrice: Number(e.target.value) })}
+                            value={r.quantity}
+                            onChange={(e) => updateRow(i, { quantity: Number(e.target.value) })}
                           />
-                          {sug !== undefined && (
-                            <span className="text-[10px] text-muted-foreground whitespace-nowrap">
-                              Usual: {fmtMoney(sug)}
+                        </td>
+                        <td className="px-5 py-3 align-middle">
+                          {hasMultipleUnits ? (
+                            <Select
+                              value={r.saleUnit ?? primaryUnit(p!.unit)}
+                              onValueChange={(v) => {
+                                const newUnit = v as UnitType;
+                                setRows((rs) =>
+                                  rs.map((row, idx) => {
+                                    if (idx !== i) return row;
+                                    // Try to get suggested price for new unit
+                                    const newSug = customerId
+                                      ? suggestedPrice(state, customerId, row.productId, newUnit)
+                                      : undefined;
+                                    return {
+                                      ...row,
+                                      saleUnit: newUnit,
+                                      unitPrice: newSug ?? row.unitPrice,
+                                    };
+                                  }),
+                                );
+                              }}
+                            >
+                              <SelectTrigger className="h-10">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {unitOptions.map((opt) => (
+                                  <SelectItem key={opt.unit} value={opt.unit}>
+                                    {opt.unit}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          ) : (
+                            <span className="whitespace-nowrap text-xs font-medium">
+                              {p ? primaryUnit(p.unit) : "—"}
                             </span>
                           )}
-                        </div>
-                      </td>
-                      <td className="px-5 py-3 text-right font-medium align-middle">
-                        {fmtMoney(r.quantity * r.unitPrice)}
-                      </td>
-                      <td className="px-5 py-3 text-right align-middle">
-                        {rows.length > 1 && (
-                          <Button size="sm" variant="ghost" onClick={() => removeRow(i)}>
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-              <tfoot>
-                <tr className="border-t border-border">
-                  <td colSpan={8} className="px-5 py-3">
-                    <Button size="sm" variant="outline" onClick={addRow}>
-                      <Plus className="h-3 w-3 mr-1" />
-                      Add Item
-                    </Button>
-                  </td>
-                  <td className="px-5 py-3 text-right font-bold">{fmtMoney(total)}</td>
-                  <td></td>
-                </tr>
-              </tfoot>
-            </table>
+                        </td>
+                        <td className="px-5 py-3 align-middle">
+                          <div className="flex items-center gap-2">
+                            <Input
+                              className="h-10 w-28 text-right"
+                              type="number"
+                              step="0.01"
+                              min={0}
+                              value={r.unitPrice}
+                              onChange={(e) => updateRow(i, { unitPrice: Number(e.target.value) })}
+                            />
+                            {sug !== undefined && (
+                              <span className="whitespace-nowrap text-[10px] text-muted-foreground">
+                                Usual: {fmtMoney(sug)}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-5 py-3 text-right align-middle font-medium">
+                          {fmtMoney(r.quantity * r.unitPrice)}
+                        </td>
+                        <td className="px-5 py-3 text-right align-middle">
+                          {rows.length > 1 && (
+                            <Button size="sm" variant="ghost" onClick={() => removeRow(i)}>
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t border-border bg-muted/10">
+                    <td colSpan={8} className="px-5 py-3">
+                      <Button size="sm" variant="outline" onClick={addRow}>
+                        <Plus className="mr-1 h-3 w-3" />
+                        Add Item
+                      </Button>
+                    </td>
+                    <td className="px-5 py-3 text-right font-bold">{fmtMoney(total)}</td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
@@ -669,6 +704,7 @@ function SalesPage() {
             toast.success("Receipt is ready to share through Telegram.");
           }
         }}
+        onToggleArchive={(sale, archived) => toggleArchiveSale(sale, archived)}
       />
 
       {viewMode === "receipt" && (
@@ -726,6 +762,16 @@ function SalesPage() {
                 <SelectItem value="unpaid">Unpaid</SelectItem>
               </SelectContent>
             </Select>
+            <Select value={rsArchive} onValueChange={(v) => setRsArchive(v as ArchiveFilter)}>
+              <SelectTrigger className="sm:w-40">
+                <SelectValue placeholder="Archive" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="active">Active</SelectItem>
+                <SelectItem value="archived">Archived</SelectItem>
+                <SelectItem value="all">All receipts</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <div className="flex flex-col sm:flex-row gap-3 mb-4">
             <Select value={rsSort} onValueChange={(v) => setRsSort(v as typeof rsSort)}>
@@ -781,13 +827,14 @@ function SalesPage() {
                   <th className="px-5 py-2 font-medium text-right">Total</th>
                   <th className="px-5 py-2 font-medium text-right">Est. Profit</th>
                   <th className="px-5 py-2 font-medium">Status</th>
+                  <th className="px-5 py-2 font-medium">Archive</th>
                   <th className="px-5 py-2 font-medium text-right">Action</th>
                 </tr>
               </thead>
               <tbody>
                 {recentSales.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-5 py-8 text-center text-muted-foreground">
+                    <td colSpan={8} className="px-5 py-8 text-center text-muted-foreground">
                       No sales match these filters.
                     </td>
                   </tr>
@@ -809,10 +856,32 @@ function SalesPage() {
                         <td className="px-5 py-3">
                           <StatusBadge status={s.paymentStatus} />
                         </td>
+                        <td className="px-5 py-3">
+                          {s.archivedAt ? (
+                            <span className="rounded-full bg-muted px-2 py-1 text-xs font-medium text-muted-foreground">
+                              Archived
+                            </span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">Active</span>
+                          )}
+                        </td>
                         <td className="px-5 py-3 text-right">
-                          <Button size="sm" variant="outline" onClick={() => setGenerated(s)}>
-                            Receipt
-                          </Button>
+                          <div className="flex justify-end gap-2">
+                            <Button size="sm" variant="outline" onClick={() => setGenerated(s)}>
+                              Receipt
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => toggleArchiveSale(s, !s.archivedAt)}
+                            >
+                              {s.archivedAt ? (
+                                <RotateCcw className="h-4 w-4" />
+                              ) : (
+                                <Archive className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -831,11 +900,13 @@ function ReceiptDialog({
   sale,
   onClose,
   onShare,
+  onToggleArchive,
   onEditInSaleMode,
 }: {
   sale: Sale | null;
   onClose: () => void;
   onShare: (status: "customer" | "owner" | "both") => void;
+  onToggleArchive: (sale: Sale, archived: boolean) => void;
   onEditInSaleMode: (sale: Sale) => void;
 }) {
   const { state } = useStore();
@@ -872,7 +943,14 @@ function ReceiptDialog({
     <Dialog open={!!sale} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Receipt</DialogTitle>
+          <DialogTitle className="flex items-center gap-2">
+            Receipt
+            {sale.archivedAt && (
+              <span className="rounded-full bg-muted px-2 py-1 text-xs font-medium text-muted-foreground">
+                Archived
+              </span>
+            )}
+          </DialogTitle>
         </DialogHeader>
         <Receipt
           sale={sale}
@@ -892,6 +970,18 @@ function ReceiptDialog({
           <Button variant="outline" size="sm" onClick={handleDownload}>
             <Download className="h-4 w-4 mr-1" />
             Download
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onToggleArchive(sale, !sale.archivedAt)}
+          >
+            {sale.archivedAt ? (
+              <RotateCcw className="h-4 w-4 mr-1" />
+            ) : (
+              <Archive className="h-4 w-4 mr-1" />
+            )}
+            {sale.archivedAt ? "Restore" : "Archive"}
           </Button>
           <Button size="sm" onClick={() => onShare("customer")}>
             <Send className="h-4 w-4 mr-1" />

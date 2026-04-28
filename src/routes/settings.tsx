@@ -10,8 +10,10 @@ import { toast } from "sonner";
 export const Route = createFileRoute("/settings")({ component: SettingsPage });
 
 function SettingsPage() {
-  const { state, setShopName, reset } = useStore();
+  const { state, setShopContact, setShopName, reset } = useStore();
   const [name, setName] = useState(state.shopName);
+  const [email, setEmail] = useState(state.shopEmail ?? "");
+  const [telegram, setTelegram] = useState(state.shopTelegram ?? "");
   return (
     <div>
       <PageHeader title="Settings" description="Shop preferences and prototype data." />
@@ -31,6 +33,43 @@ function SettingsPage() {
           </Button>
         </div>
       </PageSection>
+      <div className="mt-6">
+        <PageSection
+          title="Customer Contact"
+          description="This contact information appears in the customer ordering app."
+        >
+          <div className="max-w-md space-y-3">
+            <div>
+              <Label>Seller Email</Label>
+              <Input
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="seller@example.com"
+              />
+            </div>
+            <div>
+              <Label>Seller Telegram</Label>
+              <Input
+                value={telegram}
+                onChange={(e) => setTelegram(e.target.value)}
+                placeholder="@username or https://t.me/username"
+              />
+            </div>
+            <Button
+              onClick={() => {
+                const result = setShopContact({ email, telegram });
+                if (!result.ok) {
+                  toast.error(result.error);
+                  return;
+                }
+                toast.success("Customer contact saved");
+              }}
+            >
+              Save Contact
+            </Button>
+          </div>
+        </PageSection>
+      </div>
       <div className="mt-6">
         <PageSection
           title="Reset Data"

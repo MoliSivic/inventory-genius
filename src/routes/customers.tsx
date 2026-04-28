@@ -78,7 +78,7 @@ function CustomersPage() {
     <div>
       <PageHeader
         title="Customers"
-        description="Customer profiles, sales totals, and debts."
+        description="Customer profiles, self-selected markets, sales totals, and debts."
         actions={
           <div className="flex flex-col sm:flex-row gap-2">
             <Button variant="outline" onClick={() => setMarketOpen(true)}>
@@ -206,7 +206,6 @@ function CustomersPage() {
         open={open}
         onClose={() => setOpen(false)}
         customer={editing}
-        markets={markets}
         onSave={(c) => {
           upsertCustomer(c);
           toast.success(editing ? "Updated" : "Added");
@@ -282,7 +281,8 @@ function MarketManagerDialog({
             <div>
               <Label>Add Market Location</Label>
               <p className="text-xs text-muted-foreground mt-1">
-                Create market locations first, then assign them to customers.
+                Create delivery market locations. Customer app users choose their own market from
+                this list.
               </p>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3">
@@ -381,29 +381,25 @@ function CustomerDialog({
   open,
   onClose,
   customer,
-  markets,
   onSave,
 }: {
   open: boolean;
   onClose: () => void;
   customer: Customer | null;
-  markets: string[];
   onSave: (c: Omit<Customer, "id"> & { id?: string }) => void;
 }) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
-  const [marketField, setMarketField] = useState("");
   const [telegram, setTelegram] = useState("");
   const [type, setType] = useState("Retailer");
   const [notes, setNotes] = useState("");
   useEffect(() => {
     setName(customer?.name ?? "");
     setPhone(customer?.phone ?? "");
-    setMarketField(customer?.market ?? markets[0] ?? "");
     setTelegram(customer?.telegram ?? "");
     setType(customer?.type ?? "Retailer");
     setNotes(customer?.notes ?? "");
-  }, [customer, markets, open]);
+  }, [customer, open]);
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent>
@@ -432,22 +428,15 @@ function CustomerDialog({
           <p className="text-xs text-muted-foreground">
             Use the customer&apos;s Telegram username or link so receipts can open and send faster.
           </p>
+          <div className="rounded-md border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
+            Market is controlled by the customer in their customer app settings.
+            {customer?.market ? (
+              <span className="mt-1 block font-medium text-foreground">
+                Current market: {customer.market}
+              </span>
+            ) : null}
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div>
-              <Label>Market / Location</Label>
-              <Select value={marketField} onValueChange={setMarketField}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select market" />
-                </SelectTrigger>
-                <SelectContent>
-                  {markets.map((item) => (
-                    <SelectItem key={item} value={item}>
-                      {item}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
             <div>
               <Label>Type</Label>
               <Select value={type} onValueChange={setType}>
@@ -477,15 +466,11 @@ function CustomerDialog({
                 toast.error("Name required");
                 return;
               }
-              if (!marketField.trim()) {
-                toast.error("Market required");
-                return;
-              }
               onSave({
                 id: customer?.id,
                 name: name.trim(),
                 phone,
-                market: marketField,
+                market: customer?.market ?? "",
                 telegram: telegram.trim() || undefined,
                 type,
                 notes: notes || undefined,

@@ -28,6 +28,7 @@ import { Route as AuthIndexRouteImport } from './routes/auth/index'
 import { Route as CustomerPricesSetupRouteImport } from './routes/customer-prices/setup'
 import { Route as BuyerSignUpRouteImport } from './routes/buyer/sign-up'
 import { Route as BuyerShopRouteImport } from './routes/buyer/shop'
+import { Route as BuyerSettingsRouteImport } from './routes/buyer/settings'
 import { Route as BuyerOrdersRouteImport } from './routes/buyer/orders'
 import { Route as BuyerInvoicesRouteImport } from './routes/buyer/invoices'
 import { Route as BuyerDebtRouteImport } from './routes/buyer/debt'
@@ -131,6 +132,11 @@ const BuyerShopRoute = BuyerShopRouteImport.update({
   path: '/shop',
   getParentRoute: () => BuyerRoute,
 } as any)
+const BuyerSettingsRoute = BuyerSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => BuyerRoute,
+} as any)
 const BuyerOrdersRoute = BuyerOrdersRouteImport.update({
   id: '/orders',
   path: '/orders',
@@ -189,6 +195,7 @@ export interface FileRoutesByFullPath {
   '/buyer/debt': typeof BuyerDebtRoute
   '/buyer/invoices': typeof BuyerInvoicesRoute
   '/buyer/orders': typeof BuyerOrdersRoute
+  '/buyer/settings': typeof BuyerSettingsRoute
   '/buyer/shop': typeof BuyerShopRoute
   '/buyer/sign-up': typeof BuyerSignUpRoute
   '/customer-prices/setup': typeof CustomerPricesSetupRoute
@@ -215,6 +222,7 @@ export interface FileRoutesByTo {
   '/buyer/debt': typeof BuyerDebtRoute
   '/buyer/invoices': typeof BuyerInvoicesRoute
   '/buyer/orders': typeof BuyerOrdersRoute
+  '/buyer/settings': typeof BuyerSettingsRoute
   '/buyer/shop': typeof BuyerShopRoute
   '/buyer/sign-up': typeof BuyerSignUpRoute
   '/customer-prices/setup': typeof CustomerPricesSetupRoute
@@ -244,6 +252,7 @@ export interface FileRoutesById {
   '/buyer/debt': typeof BuyerDebtRoute
   '/buyer/invoices': typeof BuyerInvoicesRoute
   '/buyer/orders': typeof BuyerOrdersRoute
+  '/buyer/settings': typeof BuyerSettingsRoute
   '/buyer/shop': typeof BuyerShopRoute
   '/buyer/sign-up': typeof BuyerSignUpRoute
   '/customer-prices/setup': typeof CustomerPricesSetupRoute
@@ -274,6 +283,7 @@ export interface FileRouteTypes {
     | '/buyer/debt'
     | '/buyer/invoices'
     | '/buyer/orders'
+    | '/buyer/settings'
     | '/buyer/shop'
     | '/buyer/sign-up'
     | '/customer-prices/setup'
@@ -300,6 +310,7 @@ export interface FileRouteTypes {
     | '/buyer/debt'
     | '/buyer/invoices'
     | '/buyer/orders'
+    | '/buyer/settings'
     | '/buyer/shop'
     | '/buyer/sign-up'
     | '/customer-prices/setup'
@@ -328,6 +339,7 @@ export interface FileRouteTypes {
     | '/buyer/debt'
     | '/buyer/invoices'
     | '/buyer/orders'
+    | '/buyer/settings'
     | '/buyer/shop'
     | '/buyer/sign-up'
     | '/customer-prices/setup'
@@ -487,6 +499,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BuyerShopRouteImport
       parentRoute: typeof BuyerRoute
     }
+    '/buyer/settings': {
+      id: '/buyer/settings'
+      path: '/settings'
+      fullPath: '/buyer/settings'
+      preLoaderRoute: typeof BuyerSettingsRouteImport
+      parentRoute: typeof BuyerRoute
+    }
     '/buyer/orders': {
       id: '/buyer/orders'
       path: '/orders'
@@ -561,6 +580,7 @@ interface BuyerRouteChildren {
   BuyerDebtRoute: typeof BuyerDebtRoute
   BuyerInvoicesRoute: typeof BuyerInvoicesRoute
   BuyerOrdersRoute: typeof BuyerOrdersRoute
+  BuyerSettingsRoute: typeof BuyerSettingsRoute
   BuyerShopRoute: typeof BuyerShopRoute
   BuyerSignUpRoute: typeof BuyerSignUpRoute
   BuyerIndexRoute: typeof BuyerIndexRoute
@@ -570,6 +590,7 @@ const BuyerRouteChildren: BuyerRouteChildren = {
   BuyerDebtRoute: BuyerDebtRoute,
   BuyerInvoicesRoute: BuyerInvoicesRoute,
   BuyerOrdersRoute: BuyerOrdersRoute,
+  BuyerSettingsRoute: BuyerSettingsRoute,
   BuyerShopRoute: BuyerShopRoute,
   BuyerSignUpRoute: BuyerSignUpRoute,
   BuyerIndexRoute: BuyerIndexRoute,
