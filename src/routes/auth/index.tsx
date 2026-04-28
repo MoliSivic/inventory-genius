@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   getSupabaseClient,
+  getSupabaseUserProfile,
   getSupabaseUnavailableMessage,
   isMockAuthEnabled,
   isSupabaseReady,
@@ -16,11 +17,13 @@ import {
   MOCK_AUTH_DEMO_PASSWORD,
   signInWithMockCredentials,
 } from "@/lib/supabase";
+import { useStore } from "@/lib/store";
 
 export const Route = createFileRoute("/auth/")({ component: SignInPage });
 
 function SignInPage() {
   const navigate = Route.useNavigate();
+  const { signInBuyer } = useStore();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -33,10 +36,20 @@ function SignInPage() {
     setErrorMessage("");
 
     if (isMockAuthEnabled) {
+      const buyerResult = signInBuyer(email, password);
+
+      if (buyerResult.ok) {
+        toast.success("Signed in as customer.");
+        await navigate({ to: "/buyer/shop" });
+        return;
+      }
+
       const result = signInWithMockCredentials(email, password);
 
       if (!result.ok) {
-        setErrorMessage(result.message);
+        setErrorMessage(
+          "Invalid credentials. Use admin@gmail.com / admin123 for seller, or customer@gmail.com / customer123 for customer.",
+        );
         return;
       }
 
@@ -69,8 +82,15 @@ function SignInPage() {
         return;
       }
 
+      const profile = await getSupabaseUserProfile(data.session.user);
+
       toast.success("Signed in successfully.");
-      await navigate({ to: "/" });
+      if (profile.role === "admin") {
+        await navigate({ to: "/" });
+        return;
+      }
+
+      await navigate({ to: "/buyer/shop" });
     } finally {
       setIsSubmitting(false);
     }
@@ -101,8 +121,11 @@ function SignInPage() {
       {isMockAuthEnabled && (
         <Alert>
           <AlertTitle>Mock Credentials</AlertTitle>
-          <AlertDescription>
-            Email: {MOCK_AUTH_DEMO_EMAIL} | Password: {MOCK_AUTH_DEMO_PASSWORD}
+          <AlertDescription className="space-y-1">
+            <p>
+              Seller: {MOCK_AUTH_DEMO_EMAIL} | Password: {MOCK_AUTH_DEMO_PASSWORD}
+            </p>
+            <p>Customer: customer@gmail.com | Password: customer123</p>
           </AlertDescription>
         </Alert>
       )}

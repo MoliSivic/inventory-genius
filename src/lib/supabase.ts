@@ -1,6 +1,9 @@
-import { createClient, type EmailOtpType } from "@supabase/supabase-js";
+import { createClient, type EmailOtpType, type User } from "@supabase/supabase-js";
 
 const ENABLE_SUPABASE_AUTH = import.meta.env.VITE_ENABLE_SUPABASE_AUTH as string | undefined;
+const ENABLE_SUPABASE_DATA_SYNC = import.meta.env.VITE_ENABLE_SUPABASE_DATA_SYNC as
+  | string
+  | undefined;
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 const APP_URL = import.meta.env.VITE_APP_URL as string | undefined;
@@ -8,6 +11,8 @@ const APP_URL = import.meta.env.VITE_APP_URL as string | undefined;
 export const isSupabaseAuthEnabled = ENABLE_SUPABASE_AUTH === "true";
 export const isSupabaseConfigured = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 export const isSupabaseReady = isSupabaseAuthEnabled && isSupabaseConfigured;
+export const isSupabaseDataSyncEnabled = ENABLE_SUPABASE_DATA_SYNC === "true";
+export const isSupabaseDataSyncReady = isSupabaseDataSyncEnabled && isSupabaseConfigured;
 export const isMockAuthEnabled = !isSupabaseAuthEnabled;
 
 export const MOCK_AUTH_DEMO_EMAIL = "admin@gmail.com";
@@ -21,10 +26,21 @@ export type MockAuthUser = {
   name?: string;
 };
 
+export type AppRole = "admin" | "customer";
+
+export type SupabaseUserProfile = {
+  userId: string;
+  email: string;
+  fullName?: string;
+  role: AppRole;
+};
+
 export const SUPABASE_AUTH_DISABLED_MESSAGE =
   "Supabase auth is disabled. Set VITE_ENABLE_SUPABASE_AUTH=true to enable it.";
 export const SUPABASE_NOT_CONFIGURED_MESSAGE =
   "Supabase auth is enabled but not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.";
+export const SUPABASE_DATA_SYNC_NOT_CONFIGURED_MESSAGE =
+  "Supabase data sync is enabled but not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.";
 
 export function getSupabaseUnavailableMessage() {
   if (!isSupabaseAuthEnabled) return SUPABASE_AUTH_DISABLED_MESSAGE;
@@ -112,7 +128,7 @@ export function signOutMockAuth() {
 }
 
 const supabaseClient =
-  isSupabaseReady && SUPABASE_URL && SUPABASE_ANON_KEY
+  (isSupabaseReady || isSupabaseDataSyncReady) && SUPABASE_URL && SUPABASE_ANON_KEY
     ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
         auth: {
           persistSession: true,
@@ -128,6 +144,52 @@ export function getSupabaseClient() {
   }
 
   return supabaseClient;
+}
+
+function fallbackNameFromUser(user: User) {
+  const metadataName = user.user_metadata?.full_name ?? user.user_metadata?.name;
+  return typeof metadataName === "string" && metadataName.trim() ? metadataName.trim() : undefined;
+}
+
+function normalizeAppRole(value: unknown): AppRole {
+  return value === "admin" ? "admin" : "customer";
+}
+
+export async function getSupabaseUserProfile(user: User): Promise<SupabaseUserProfile> {
+  const fallbackProfile: SupabaseUserProfile = {
+    userId: user.id,
+    email: user.email ?? "",
+    fullName: fallbackNameFromUser(user),
+    role: "customer",
+  };
+
+  if (!isSupabaseReady) return fallbackProfile;
+
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("user_profiles")
+    .select("user_id,email,full_name,role")
+    .eq("user_id", user.id)
+    .maybeSingle<{
+      user_id: string;
+      email: string | null;
+      full_name: string | null;
+      role: AppRole | null;
+    }>();
+
+  if (error) {
+    console.error("Failed to load Supabase user profile.", error);
+    return fallbackProfile;
+  }
+
+  if (!data) return fallbackProfile;
+
+  return {
+    userId: data.user_id,
+    email: data.email ?? fallbackProfile.email,
+    fullName: data.full_name ?? fallbackProfile.fullName,
+    role: normalizeAppRole(data.role),
+  };
 }
 
 export function getAuthRedirectUrl(pathname: string) {

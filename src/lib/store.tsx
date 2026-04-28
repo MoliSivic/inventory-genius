@@ -4,12 +4,16 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 import { LEGACY_SAMPLE_PRODUCT_IDS, seedData } from "./mock-data";
 import type {
   AppState,
+  BuyerAccount,
+  BuyerOrder,
+  BuyerOrderStatus,
   Customer,
   CustomerPrice,
   Factory,
@@ -37,6 +41,12 @@ import {
 } from "./sale-units";
 import { normalizeTelegramValue } from "./telegram";
 import { formatUnits, normalizeProductUnits, primaryUnit } from "./units";
+import {
+  canSyncRemoteState,
+  loadRemoteState,
+  saveRemoteState,
+  subscribeRemoteState,
+} from "./remote-state";
 
 const STORAGE_KEY = "wms_state_v1";
 const FALLBACK_CATEGORY_NAME = "ផ្សេងៗ";
@@ -71,6 +81,13 @@ const PRESET_SIZE_GROUPS = [
   { idPrefix: "preset_thang_khmao_dom", names: THANG_KHMAO_DOM_SIZE_PRODUCTS },
   { idPrefix: "preset_thang_porn_lor", names: THANG_PORN_LOR_SIZE_PRODUCTS },
 ] as const;
+const BUYER_ORDER_STATUSES = new Set<BuyerOrderStatus>([
+  "pending",
+  "confirmed",
+  "packing",
+  "completed",
+  "cancelled",
+]);
 
 type StoreResult = { ok: true } | { ok: false; error: string };
 
@@ -194,7 +211,12 @@ function consumeLayersForSale(layers: ProductCostLayer[], quantity: number) {
 
 export function simulateDraftSale(
   products: Product[],
-  draftItems: Array<{ productId: string; quantity: number; unit?: SaleItem["unit"]; unitPrice: number }>,
+  draftItems: Array<{
+    productId: string;
+    quantity: number;
+    unit?: SaleItem["unit"];
+    unitPrice: number;
+  }>,
 ) {
   const productById = new Map(products.map((product) => [product.id, product]));
   const nextLayersByProduct = new Map<string, ProductCostLayer[]>();
@@ -210,11 +232,7 @@ export function simulateDraftSale(
     }
 
     const saleUnit = normalizeSaleUnit(product, draftItem.unit);
-    const stockQuantity = convertSaleQuantityToStockQuantity(
-      product,
-      draftItem.quantity,
-      saleUnit,
-    );
+    const stockQuantity = convertSaleQuantityToStockQuantity(product, draftItem.quantity, saleUnit);
     const currentLayers =
       nextLayersByProduct.get(draftItem.productId) ?? fallbackProductLayers(product);
     const consumed = consumeLayersForSale(currentLayers, stockQuantity);
@@ -443,8 +461,7 @@ function buildOpeningInventoryLayers(
 
     const nextTotal = Number(total.toFixed(2));
     const paidAmount = Number(Math.min(transaction.sale.paidAmount, nextTotal).toFixed(2));
-    const paymentStatus =
-      paidAmount <= 0 ? "unpaid" : paidAmount >= nextTotal ? "paid" : "partial";
+    const paymentStatus = paidAmount <= 0 ? "unpaid" : paidAmount >= nextTotal ? "paid" : "partial";
 
     recalculatedSales.push({
       ...transaction.sale,
@@ -458,7 +475,9 @@ function buildOpeningInventoryLayers(
 
   return {
     ok: true,
-    products: products.map((product) => productMap.get(product.id) ?? applyLayersToProduct(product, [])),
+    products: products.map(
+      (product) => productMap.get(product.id) ?? applyLayersToProduct(product, []),
+    ),
     sales: recalculatedSales.reverse(),
   };
 }
@@ -490,6 +509,185 @@ function normalizeCustomers(customers: Customer[]) {
   }));
 }
 
+function normalizeBuyerAccounts(buyers: BuyerAccount[]) {
+  return buyers
+    .map((buyer) => {
+      const email = normalizeEmail(buyer.email);
+      return {
+        ...buyer,
+        email,
+        name: buyer.name.trim(),
+        market: normalizeMarketName(buyer.market),
+        location: buyer.location.trim(),
+        phone: buyer.phone?.trim() || undefined,
+        customerId:
+          buyer.id === "buyer_demo" && email === "customer@gmail.com" ? "c1" : buyer.customerId,
+      };
+    })
+    .filter(
+      (buyer) =>
+        buyer.id &&
+        buyer.email &&
+        buyer.passwordDigest &&
+        buyer.name &&
+        buyer.market &&
+        buyer.customerId,
+    );
+}
+
+function normalizeBuyerOrders(orders: BuyerOrder[]) {
+  return orders
+    .map((order) => ({
+      ...order,
+      status: BUYER_ORDER_STATUSES.has(order.status) ? order.status : ("pending" as const),
+      totalEstimate: Number(Math.max(order.totalEstimate ?? 0, 0).toFixed(2)),
+      items: Array.isArray(order.items)
+        ? order.items
+            .map((item) => ({
+              ...item,
+              quantity: Number(Math.max(item.quantity ?? 0, 0)),
+              stockQuantity: Number(Math.max(item.stockQuantity ?? 0, 0)),
+              estimatedUnitPrice:
+                item.estimatedUnitPrice === undefined
+                  ? undefined
+                  : Number(Math.max(item.estimatedUnitPrice, 0).toFixed(2)),
+            }))
+            .filter((item) => item.productId && item.quantity > 0 && item.stockQuantity > 0)
+        : [],
+    }))
+    .filter((order) => order.id && order.buyerId && order.customerId && order.items.length > 0);
+}
+
+function findSuggestedPrice(
+  state: Pick<AppState, "customerPrices" | "sales">,
+  customerId: string,
+  productId: string,
+  unit?: SaleItem["unit"],
+) {
+  const exactMatch = state.customerPrices.find(
+    (price) =>
+      price.customerId === customerId && price.productId === productId && price.unit === unit,
+  );
+  if (exactMatch) return exactMatch.price;
+
+  const fallbackMatch = state.customerPrices.find(
+    (price) =>
+      price.customerId === customerId && price.productId === productId && price.unit === undefined,
+  );
+
+  if (fallbackMatch) return fallbackMatch.price;
+
+  for (const sale of state.sales) {
+    if (sale.customerId !== customerId) continue;
+
+    const matchingItem = sale.items.find((item) => item.productId === productId);
+    if (matchingItem) return matchingItem.unitPrice;
+  }
+
+  return undefined;
+}
+
+type BuyerPriceSource = "customer" | "market" | "estimate";
+
+export type BuyerVisiblePrice = {
+  price: number;
+  source: BuyerPriceSource;
+};
+
+function roundDisplayPrice(value: number) {
+  return Number(value.toFixed(2));
+}
+
+function convertSaleUnitPrice(
+  product: Product,
+  price: number,
+  fromUnit?: SaleItem["unit"],
+  toUnit?: SaleItem["unit"],
+) {
+  const fromQuantity = getSaleUnitQuantityPerStockUnit(product, fromUnit);
+  const toQuantity = getSaleUnitQuantityPerStockUnit(product, toUnit);
+  if (toQuantity <= 0) return roundDisplayPrice(price);
+  return roundDisplayPrice((price * fromQuantity) / toQuantity);
+}
+
+function findPriceFromCustomerPrices(
+  product: Product,
+  prices: CustomerPrice[],
+  unit?: SaleItem["unit"],
+) {
+  const normalizedUnit = normalizeSaleUnit(product, unit);
+  const exactMatch = prices.find(
+    (price) =>
+      price.productId === product.id && normalizeSaleUnit(product, price.unit) === normalizedUnit,
+  );
+  const fallbackMatch = prices.find((price) => price.productId === product.id);
+  const match = exactMatch ?? fallbackMatch;
+  if (!match) return undefined;
+
+  return convertSaleUnitPrice(product, match.price, match.unit, normalizedUnit);
+}
+
+function findPriceFromSales(product: Product, sales: Sale[], unit?: SaleItem["unit"]) {
+  const normalizedUnit = normalizeSaleUnit(product, unit);
+
+  for (const sale of sales) {
+    const exactMatch = sale.items.find(
+      (item) =>
+        item.productId === product.id && normalizeSaleUnit(product, item.unit) === normalizedUnit,
+    );
+    const fallbackMatch = sale.items.find((item) => item.productId === product.id);
+    const match = exactMatch ?? fallbackMatch;
+    if (match) {
+      return convertSaleUnitPrice(product, match.unitPrice, match.unit, normalizedUnit);
+    }
+  }
+
+  return undefined;
+}
+
+function findBuyerVisiblePrice(
+  state: Pick<AppState, "customerPrices" | "products" | "sales">,
+  customerId: string,
+  productId: string,
+  unit?: SaleItem["unit"],
+): BuyerVisiblePrice | undefined {
+  const product = state.products.find((candidate) => candidate.id === productId);
+  if (!product) return undefined;
+
+  const customerPrices = state.customerPrices.filter((price) => price.customerId === customerId);
+  const customerPrice = findPriceFromCustomerPrices(product, customerPrices, unit);
+  if (customerPrice !== undefined) {
+    return { price: customerPrice, source: "customer" };
+  }
+
+  const customerSalePrice = findPriceFromSales(
+    product,
+    state.sales.filter((sale) => sale.customerId === customerId),
+    unit,
+  );
+  if (customerSalePrice !== undefined) {
+    return { price: customerSalePrice, source: "customer" };
+  }
+
+  const marketPrice = findPriceFromCustomerPrices(product, state.customerPrices, unit);
+  if (marketPrice !== undefined) {
+    return { price: marketPrice, source: "market" };
+  }
+
+  const marketSalePrice = findPriceFromSales(product, state.sales, unit);
+  if (marketSalePrice !== undefined) {
+    return { price: marketSalePrice, source: "market" };
+  }
+
+  if (product.avgCost > 0) {
+    const normalizedUnit = normalizeSaleUnit(product, unit);
+    const price = convertSaleUnitPrice(product, product.avgCost * 1.25, undefined, normalizedUnit);
+    return { price, source: "estimate" };
+  }
+
+  return undefined;
+}
+
 function productNameKey(name: string) {
   return name.normalize("NFC").trim().replace(/\s+/g, " ").toLocaleLowerCase();
 }
@@ -517,8 +715,7 @@ function dedupeProductsByName(products: Product[]): DedupeResult {
       continue;
     }
 
-    const preferred =
-      group.find((product) => product.id.startsWith("preset_")) ?? group[0];
+    const preferred = group.find((product) => product.id.startsWith("preset_")) ?? group[0];
     deduped.push(preferred);
     for (const product of group) {
       if (product.id !== preferred.id) idRemap.set(product.id, preferred.id);
@@ -550,10 +747,7 @@ function remapSaleProductIds(sales: Sale[], idRemap: Map<string, string>) {
   }));
 }
 
-function remapCustomerPriceProductIds(
-  prices: CustomerPrice[],
-  idRemap: Map<string, string>,
-) {
+function remapCustomerPriceProductIds(prices: CustomerPrice[], idRemap: Map<string, string>) {
   if (idRemap.size === 0) return prices;
   return prices.map((price) => ({
     ...price,
@@ -700,9 +894,32 @@ function mergeMissingSeedFactories(factories: Factory[]) {
   return missing.length > 0 ? [...factories, ...missing] : factories;
 }
 
+function mergeMissingSeedBuyerCustomers(customers: Customer[]) {
+  const seedBuyerCustomerIds = new Set(
+    seedData.buyerAccounts.map((buyerAccount) => buyerAccount.customerId),
+  );
+  const existingIds = new Set(customers.map((customer) => customer.id));
+  const missing = seedData.customers.filter(
+    (customer) => seedBuyerCustomerIds.has(customer.id) && !existingIds.has(customer.id),
+  );
+  return missing.length > 0 ? [...customers, ...missing] : customers;
+}
+
+function mergeMissingSeedBuyerAccounts(buyerAccounts: BuyerAccount[]) {
+  const existingEmails = new Set(buyerAccounts.map((buyerAccount) => buyerAccount.email));
+  const missing = seedData.buyerAccounts.filter(
+    (buyerAccount) => !existingEmails.has(buyerAccount.email),
+  );
+  return missing.length > 0 ? [...buyerAccounts, ...missing] : buyerAccounts;
+}
+
 function normalizeAppState(state: AppState): AppState {
   const prunedState = pruneLegacySampleData(state);
-  const customers = normalizeCustomers(prunedState.customers);
+  const customers = normalizeCustomers(mergeMissingSeedBuyerCustomers(prunedState.customers));
+  const buyerAccounts = normalizeBuyerAccounts(
+    mergeMissingSeedBuyerAccounts(prunedState.buyerAccounts ?? []),
+  );
+  const buyerOrders = normalizeBuyerOrders(prunedState.buyerOrders ?? []);
   const factories = mergeMissingSeedFactories(prunedState.factories);
   const mergedProducts = expandPresetSizeProducts(
     normalizeProducts(applySeedPresetProducts(prunedState.products)),
@@ -710,10 +927,7 @@ function normalizeAppState(state: AppState): AppState {
   const { products: dedupedProducts, idRemap } = dedupeProductsByName(mergedProducts);
   const remappedStockIns = remapStockInProductIds(prunedState.stockIns, idRemap);
   const remappedSales = remapSaleProductIds(prunedState.sales, idRemap);
-  const remappedCustomerPrices = remapCustomerPriceProductIds(
-    prunedState.customerPrices,
-    idRemap,
-  );
+  const remappedCustomerPrices = remapCustomerPriceProductIds(prunedState.customerPrices, idRemap);
   const baseProductIds = new Set(dedupedProducts.map((product) => product.id));
   const stockIns = mergeMissingSeedStockIns(remappedStockIns).filter((invoice) =>
     invoice.items.every((item) => baseProductIds.has(item.productId)),
@@ -729,8 +943,13 @@ function normalizeAppState(state: AppState): AppState {
   return {
     ...prunedState,
     customers,
+    buyerAccounts,
+    buyerOrders,
+    buyerSessionId: buyerAccounts.some((buyer) => buyer.id === prunedState.buyerSessionId)
+      ? prunedState.buyerSessionId
+      : undefined,
     factories,
-    markets: normalizeMarkets(prunedState.markets, customers),
+    markets: normalizeMarkets(prunedState.markets, [...customers, ...buyerAccounts]),
     products,
     stockIns,
     sales,
@@ -782,8 +1001,37 @@ function uid(prefix: string) {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 }
 
+function todayIsoString() {
+  return new Date().toISOString();
+}
+
+function normalizeEmail(email: string) {
+  return email.trim().toLocaleLowerCase();
+}
+
+function nameFromEmail(email: string) {
+  const localPart = email.split("@")[0]?.trim();
+  if (!localPart) return "Customer";
+
+  return localPart
+    .replace(/[._-]+/g, " ")
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toLocaleUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function getBuyerPasswordDigest(password: string) {
+  let hash = 5381;
+  for (let index = 0; index < password.length; index += 1) {
+    hash = (hash * 33) ^ password.charCodeAt(index);
+  }
+  return `local-${(hash >>> 0).toString(36)}-${password.length}`;
+}
+
 interface StoreContextValue {
   state: AppState;
+  currentBuyer: BuyerAccount | null;
   reset: () => void;
   // categories
   addCategory: (category: ProductCategory) => StoreResult;
@@ -810,6 +1058,24 @@ interface StoreContextValue {
   // customers
   upsertCustomer: (c: Omit<Customer, "id"> & { id?: string }) => void;
   deleteCustomer: (id: string) => void;
+  // buyers
+  registerBuyer: (data: {
+    email: string;
+    password: string;
+    name: string;
+    phone?: string;
+    market: string;
+    location: string;
+  }) => { ok: true; buyer: BuyerAccount } | { ok: false; error: string };
+  signInBuyer: (email: string, password: string) => StoreResult;
+  signInBuyerByEmail: (email: string) => StoreResult;
+  signOutBuyer: () => void;
+  addBuyerOrder: (data: {
+    buyerId: string;
+    items: Array<{ productId: string; quantity: number; unit?: SaleItem["unit"] }>;
+    notes?: string;
+  }) => BuyerOrder | { error: string };
+  updateBuyerOrderStatus: (orderId: string, status: BuyerOrderStatus, sellerNote?: string) => void;
   setCustomerProductPrices: (
     customerId: string,
     entries: Array<{
@@ -860,11 +1126,48 @@ const StoreContext = createContext<StoreContextValue | null>(null);
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AppState>(seedData);
   const [hydrated, setHydrated] = useState(false);
+  const applyingRemoteStateRef = useRef(false);
+  const latestSerializedStateRef = useRef(JSON.stringify(seedData));
+  const lastSavedRemoteStateRef = useRef("");
 
   useEffect(() => {
-    setState(loadState());
-    setHydrated(true);
+    let cancelled = false;
+    const localState = loadState();
+    latestSerializedStateRef.current = JSON.stringify(localState);
+    setState(localState);
+
+    if (!canSyncRemoteState()) {
+      setHydrated(true);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void loadRemoteState(localState)
+      .then((remoteState) => {
+        if (cancelled) return;
+
+        const normalizedState = normalizeAppState(remoteState);
+        const serializedState = JSON.stringify(normalizedState);
+        applyingRemoteStateRef.current = true;
+        latestSerializedStateRef.current = serializedState;
+        lastSavedRemoteStateRef.current = serializedState;
+        setState(normalizedState);
+        setHydrated(true);
+      })
+      .catch((error) => {
+        console.error("Failed to load Supabase app state. Falling back to local state.", error);
+        if (!cancelled) setHydrated(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  useEffect(() => {
+    latestSerializedStateRef.current = JSON.stringify(state);
+  }, [state]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -873,6 +1176,44 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     } catch {
       /* ignore quota */
     }
+  }, [state, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated || !canSyncRemoteState()) return;
+
+    return subscribeRemoteState((remoteState) => {
+      const normalizedState = normalizeAppState(remoteState);
+      const serializedState = JSON.stringify(normalizedState);
+
+      if (serializedState === latestSerializedStateRef.current) return;
+
+      applyingRemoteStateRef.current = true;
+      latestSerializedStateRef.current = serializedState;
+      lastSavedRemoteStateRef.current = serializedState;
+      setState(normalizedState);
+    });
+  }, [hydrated]);
+
+  useEffect(() => {
+    if (!hydrated || !canSyncRemoteState()) return;
+
+    if (applyingRemoteStateRef.current) {
+      applyingRemoteStateRef.current = false;
+      return;
+    }
+
+    const serializedState = JSON.stringify(state);
+    if (serializedState === lastSavedRemoteStateRef.current) return;
+
+    const timeout = window.setTimeout(() => {
+      lastSavedRemoteStateRef.current = serializedState;
+      void saveRemoteState(state).catch((error) => {
+        lastSavedRemoteStateRef.current = "";
+        console.error("Failed to save Supabase app state.", error);
+      });
+    }, 500);
+
+    return () => window.clearTimeout(timeout);
   }, [state, hydrated]);
 
   useEffect(() => {
@@ -1231,6 +1572,266 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setState((s) => ({ ...s, customers: s.customers.filter((c) => c.id !== id) }));
   }, []);
 
+  const registerBuyer: StoreContextValue["registerBuyer"] = useCallback((data) => {
+    let result: ReturnType<StoreContextValue["registerBuyer"]> = {
+      ok: false,
+      error: "Unknown error",
+    };
+
+    setState((s) => {
+      const email = normalizeEmail(data.email);
+      const name = data.name.trim();
+      const phone = data.phone?.trim() || undefined;
+      const marketName = normalizeMarketName(data.market);
+      const location = data.location.trim();
+
+      if (!email || !email.includes("@")) {
+        result = { ok: false, error: "Enter a valid email address." };
+        return s;
+      }
+
+      if (data.password.length < 6) {
+        result = { ok: false, error: "Password must be at least 6 characters." };
+        return s;
+      }
+
+      if (!name) {
+        result = { ok: false, error: "Name is required." };
+        return s;
+      }
+
+      if (!marketName) {
+        result = { ok: false, error: "Market is required." };
+        return s;
+      }
+
+      if (!location) {
+        result = { ok: false, error: "Location is required." };
+        return s;
+      }
+
+      if (s.buyerAccounts.some((buyer) => buyer.email === email)) {
+        result = { ok: false, error: "This email already has a buyer account." };
+        return s;
+      }
+
+      const matchedMarket = s.markets.find((market) => sameMarketName(market, marketName));
+      const nextMarketName = matchedMarket ?? marketName;
+      const customerId = uid("c");
+      const buyer: BuyerAccount = {
+        id: uid("buyer"),
+        email,
+        passwordDigest: getBuyerPasswordDigest(data.password),
+        name,
+        phone,
+        market: nextMarketName,
+        location,
+        customerId,
+        createdAt: todayIsoString(),
+      };
+      const customer: Customer = {
+        id: customerId,
+        name,
+        phone: phone ?? "",
+        market: nextMarketName,
+        type: "Buyer App",
+        notes: `Buyer account: ${email}. Location: ${location}`,
+      };
+
+      result = { ok: true, buyer };
+
+      return {
+        ...s,
+        markets: matchedMarket ? s.markets : [...s.markets, nextMarketName],
+        customers: [...s.customers, customer],
+        buyerAccounts: [...s.buyerAccounts, buyer],
+        buyerSessionId: buyer.id,
+      };
+    });
+
+    return result;
+  }, []);
+
+  const signInBuyer: StoreContextValue["signInBuyer"] = useCallback((email, password) => {
+    let result: StoreResult = { ok: false, error: "Invalid email or password." };
+
+    setState((s) => {
+      const buyer = s.buyerAccounts.find((account) => account.email === normalizeEmail(email));
+
+      if (!buyer || buyer.passwordDigest !== getBuyerPasswordDigest(password)) {
+        result = { ok: false, error: "Invalid email or password." };
+        return s;
+      }
+
+      result = { ok: true };
+      return { ...s, buyerSessionId: buyer.id };
+    });
+
+    return result;
+  }, []);
+
+  const signInBuyerByEmail: StoreContextValue["signInBuyerByEmail"] = useCallback((email) => {
+    let result: StoreResult = { ok: false, error: "Enter a valid email address." };
+
+    setState((s) => {
+      const normalizedEmail = normalizeEmail(email);
+
+      if (!normalizedEmail || !normalizedEmail.includes("@")) {
+        result = { ok: false, error: "Enter a valid email address." };
+        return s;
+      }
+
+      const buyer = s.buyerAccounts.find((account) => account.email === normalizedEmail);
+
+      if (buyer) {
+        result = { ok: true };
+        return { ...s, buyerSessionId: buyer.id };
+      }
+
+      const marketName = normalizeMarketName(s.markets[0] ?? FALLBACK_MARKET_NAME);
+      const marketExists = s.markets.some((market) => sameMarketName(market, marketName));
+      const customerId = uid("c");
+      const now = todayIsoString();
+      const displayName = nameFromEmail(normalizedEmail);
+      const newBuyer: BuyerAccount = {
+        id: uid("buyer"),
+        email: normalizedEmail,
+        passwordDigest: getBuyerPasswordDigest(`supabase-auth-${normalizedEmail}`),
+        name: displayName,
+        market: marketName,
+        location: "Online account",
+        customerId,
+        createdAt: now,
+      };
+      const customer: Customer = {
+        id: customerId,
+        name: displayName,
+        phone: "",
+        market: marketName,
+        type: "Buyer App",
+        notes: `Supabase customer account: ${normalizedEmail}`,
+      };
+
+      result = { ok: true };
+      return {
+        ...s,
+        markets: marketExists ? s.markets : [...s.markets, marketName],
+        customers: [...s.customers, customer],
+        buyerAccounts: [...s.buyerAccounts, newBuyer],
+        buyerSessionId: newBuyer.id,
+      };
+    });
+
+    return result;
+  }, []);
+
+  const signOutBuyer: StoreContextValue["signOutBuyer"] = useCallback(() => {
+    setState((s) => ({ ...s, buyerSessionId: undefined }));
+  }, []);
+
+  const addBuyerOrder: StoreContextValue["addBuyerOrder"] = useCallback((data) => {
+    let result: BuyerOrder | { error: string } = { error: "Unknown error" };
+
+    setState((s) => {
+      const buyer = s.buyerAccounts.find((account) => account.id === data.buyerId);
+      if (!buyer) {
+        result = { error: "Please sign in again." };
+        return s;
+      }
+
+      if (data.items.length === 0) {
+        result = { error: "Add at least one product." };
+        return s;
+      }
+
+      const orderItems: BuyerOrder["items"] = [];
+      let totalEstimate = 0;
+
+      for (const item of data.items) {
+        const product = s.products.find((candidate) => candidate.id === item.productId);
+        if (!product) {
+          result = { error: "Product not found." };
+          return s;
+        }
+
+        const unit = normalizeSaleUnit(product, item.unit);
+        const quantity = Number(Math.max(item.quantity, 0));
+        if (quantity <= 0) {
+          result = { error: `Quantity must be greater than zero for ${product.name}.` };
+          return s;
+        }
+
+        if (
+          shouldLimitSaleSubUnitToSingleStockUnit(product, unit) &&
+          quantity >= getSaleUnitQuantityPerStockUnit(product, unit)
+        ) {
+          result = {
+            error: `Package orders for ${product.name} must stay below 1 ${formatUnits(product.unit)}.`,
+          };
+          return s;
+        }
+
+        const stockQuantity = convertSaleQuantityToStockQuantity(product, quantity, unit);
+        if (stockQuantity > product.stock) {
+          result = { error: `Not enough stock for ${product.name}.` };
+          return s;
+        }
+
+        const visiblePrice = findBuyerVisiblePrice(s, buyer.customerId, product.id, unit);
+        const estimatedUnitPrice = visiblePrice?.price;
+        if (estimatedUnitPrice !== undefined) {
+          totalEstimate += quantity * estimatedUnitPrice;
+        }
+
+        orderItems.push({
+          productId: product.id,
+          quantity,
+          unit,
+          stockQuantity,
+          estimatedUnitPrice,
+        });
+      }
+
+      const now = todayIsoString();
+      const order: BuyerOrder = {
+        id: uid("bo"),
+        orderNumber: `O-${3000 + s.buyerOrders.length + 1}`,
+        buyerId: buyer.id,
+        customerId: buyer.customerId,
+        date: now,
+        updatedAt: now,
+        status: "pending",
+        items: orderItems,
+        totalEstimate: Number(totalEstimate.toFixed(2)),
+        notes: data.notes?.trim() || undefined,
+      };
+
+      result = order;
+      return { ...s, buyerOrders: [order, ...s.buyerOrders] };
+    });
+
+    return result;
+  }, []);
+
+  const updateBuyerOrderStatus: StoreContextValue["updateBuyerOrderStatus"] = useCallback(
+    (orderId, status, sellerNote) => {
+      setState((s) => ({
+        ...s,
+        buyerOrders: s.buyerOrders.map((order) =>
+          order.id === orderId
+            ? {
+                ...order,
+                status,
+                sellerNote: sellerNote?.trim() || order.sellerNote,
+                updatedAt: todayIsoString(),
+              }
+            : order,
+        ),
+      }));
+    },
+    [],
+  );
+
   const setCustomerProductPrices: StoreContextValue["setCustomerProductPrices"] = useCallback(
     (customerId, entries) => {
       if (!customerId) return;
@@ -1256,7 +1857,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const updatedProductIds = new Set(normalizedEntries.map((entry) => entry.productId));
         const customerPrices = s.customerPrices.filter(
           (customerPrice) =>
-            !(customerPrice.customerId === customerId && updatedProductIds.has(customerPrice.productId)),
+            !(
+              customerPrice.customerId === customerId &&
+              updatedProductIds.has(customerPrice.productId)
+            ),
         );
 
         normalizedEntries.forEach((entry) => {
@@ -1313,11 +1917,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const nextStockIns = s.stockIns.map((invoice) =>
         invoice.id === invoiceId ? { ...invoice, ...data, total } : invoice,
       );
-      const recalculated = buildOpeningInventoryLayers(
-        s.products,
-        nextStockIns,
-        s.sales,
-      );
+      const recalculated = buildOpeningInventoryLayers(s.products, nextStockIns, s.sales);
 
       if (!recalculated.ok) {
         result = { ok: false, error: recalculated.error };
@@ -1382,7 +1982,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return s;
       }
 
-      const paidAmount = Number(Math.min(Math.max(data.paidAmount, 0), simulation.total).toFixed(2));
+      const paidAmount = Number(
+        Math.min(Math.max(data.paidAmount, 0), simulation.total).toFixed(2),
+      );
       const paymentStatus =
         paidAmount <= 0 ? "unpaid" : paidAmount >= simulation.total ? "paid" : "partial";
       const receiptNumber = `R-${2000 + s.sales.length + 1}`;
@@ -1581,9 +2183,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setState((s) => ({ ...s, shopName: name }));
   }, []);
 
+  const currentBuyer = useMemo(
+    () => state.buyerAccounts.find((buyer) => buyer.id === state.buyerSessionId) ?? null,
+    [state.buyerAccounts, state.buyerSessionId],
+  );
+
   const value = useMemo<StoreContextValue>(
     () => ({
       state,
+      currentBuyer,
       reset,
       addCategory,
       updateCategory,
@@ -1599,6 +2207,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       deleteFactory,
       upsertCustomer,
       deleteCustomer,
+      registerBuyer,
+      signInBuyer,
+      signInBuyerByEmail,
+      signOutBuyer,
+      addBuyerOrder,
+      updateBuyerOrderStatus,
       setCustomerProductPrices,
       addStockIn,
       updateStockIn,
@@ -1610,6 +2224,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }),
     [
       state,
+      currentBuyer,
       reset,
       addCategory,
       updateCategory,
@@ -1625,6 +2240,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       deleteFactory,
       upsertCustomer,
       deleteCustomer,
+      registerBuyer,
+      signInBuyer,
+      signInBuyerByEmail,
+      signOutBuyer,
+      addBuyerOrder,
+      updateBuyerOrderStatus,
       setCustomerProductPrices,
       addStockIn,
       updateStockIn,
@@ -1666,31 +2287,16 @@ export function suggestedPrice(
   productId: string,
   unit?: SaleItem["unit"],
 ): number | undefined {
-  const exactMatch = state.customerPrices.find(
-    (price) =>
-      price.customerId === customerId &&
-      price.productId === productId &&
-      price.unit === unit,
-  );
-  if (exactMatch) return exactMatch.price;
+  return findSuggestedPrice(state, customerId, productId, unit);
+}
 
-  const fallbackMatch = state.customerPrices.find(
-    (price) =>
-      price.customerId === customerId &&
-      price.productId === productId &&
-      price.unit === undefined,
-  );
-
-  if (fallbackMatch) return fallbackMatch.price;
-
-  for (const sale of state.sales) {
-    if (sale.customerId !== customerId) continue;
-
-    const matchingItem = sale.items.find((item) => item.productId === productId);
-    if (matchingItem) return matchingItem.unitPrice;
-  }
-
-  return undefined;
+export function buyerVisiblePrice(
+  state: AppState,
+  customerId: string,
+  productId: string,
+  unit?: SaleItem["unit"],
+): BuyerVisiblePrice | undefined {
+  return findBuyerVisiblePrice(state, customerId, productId, unit);
 }
 
 export function fmtMoney(n: number) {

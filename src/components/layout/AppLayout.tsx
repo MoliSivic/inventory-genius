@@ -1,4 +1,5 @@
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
+import type { Session } from "@supabase/supabase-js";
 import { useEffect, useState, type ReactNode } from "react";
 import {
   LayoutDashboard,
@@ -10,6 +11,7 @@ import {
   Tag,
   TrendingUp,
   Wallet,
+  ClipboardList,
   FileDown,
   Settings,
   Menu,
@@ -20,8 +22,10 @@ import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import {
+  type AppRole,
   getMockAuthUser,
   getSupabaseClient,
+  getSupabaseUserProfile,
   getSupabaseUnavailableMessage,
   isMockAuthEnabled,
   MOCK_AUTH_STATE_CHANGED_EVENT,
@@ -58,6 +62,7 @@ const navGroups: NavGroup[] = [
     items: [
       { to: "/customers", label: "Customers", icon: Users },
       { to: "/sales", label: "Sales", icon: ShoppingCart },
+      { to: "/orders", label: "Buyer Orders", icon: ClipboardList },
       { to: "/customer-prices", label: "Customer Prices", icon: Tag },
     ],
   },
@@ -96,38 +101,53 @@ function resolveDisplayName(name: unknown, email: string | null) {
 
 export function AppLayout({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
-  const { state } = useStore();
+  const { state, currentBuyer } = useStore();
   const location = useLocation();
   const navigate = useNavigate();
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userName, setUserName] = useState<string | null>(null);
+  const [userRole, setUserRole] = useState<AppRole | null>(null);
   const [isAuthResolved, setIsAuthResolved] = useState(false);
   const isAuthPage = location.pathname.startsWith("/auth");
+  const isBuyerPage = location.pathname.startsWith("/buyer");
 
   useEffect(() => {
     if (isSupabaseReady) {
       const supabase = getSupabaseClient();
       let isMounted = true;
 
-      void supabase.auth.getSession().then(({ data }) => {
-        if (!isMounted) return;
-        const email = data.session?.user?.email ?? null;
-        const profileName =
-          data.session?.user?.user_metadata?.full_name ?? data.session?.user?.user_metadata?.name;
+      const syncSession = async (session: Session | null) => {
+        const email = session?.user?.email ?? null;
 
-        setUserEmail(email);
-        setUserName(resolveDisplayName(profileName, email));
+        if (!isMounted) return;
+
+        if (!session?.user) {
+          setUserEmail(null);
+          setUserName(null);
+          setUserRole(null);
+          setIsAuthResolved(true);
+          return;
+        }
+
+        const profile = await getSupabaseUserProfile(session.user);
+
+        if (!isMounted) return;
+
+        const profileName =
+          profile.fullName ??
+          session.user.user_metadata?.full_name ??
+          session.user.user_metadata?.name;
+
+        setUserEmail(profile.email || email);
+        setUserName(resolveDisplayName(profileName, profile.email || email));
+        setUserRole(profile.role);
         setIsAuthResolved(true);
-      });
+      };
+
+      void supabase.auth.getSession().then(({ data }) => syncSession(data.session));
 
       const { data: subscription } = supabase.auth.onAuthStateChange((_event, session) => {
-        const email = session?.user?.email ?? null;
-        const profileName =
-          session?.user?.user_metadata?.full_name ?? session?.user?.user_metadata?.name;
-
-        setUserEmail(email);
-        setUserName(resolveDisplayName(profileName, email));
-        setIsAuthResolved(true);
+        void syncSession(session);
       });
 
       return () => {
@@ -143,6 +163,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
         setUserEmail(email);
         setUserName(resolveDisplayName(mockUser?.name, email));
+        setUserRole(email ? "admin" : null);
         setIsAuthResolved(true);
       };
 
@@ -158,27 +179,65 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
     setUserEmail(null);
     setUserName(null);
+    setUserRole(null);
     setIsAuthResolved(true);
   }, []);
 
   useEffect(() => {
     if (!isAuthResolved) return;
 
+    if (isBuyerPage) {
+      if (userEmail && userRole === "admin") {
+        void navigate({ to: "/", replace: true });
+      }
+      return;
+    }
+
     if (isAuthPage && userEmail) {
-      void navigate({ to: "/", replace: true });
+      if (userRole === "admin") {
+        void navigate({ to: "/", replace: true });
+        return;
+      }
+
+      if (currentBuyer) {
+        void navigate({ to: "/buyer/shop", replace: true });
+        return;
+      }
+
+      void navigate({ to: "/buyer/shop", replace: true });
       return;
     }
 
     if (!isAuthPage && !userEmail) {
       void navigate({ to: "/auth", replace: true });
+      return;
     }
-  }, [isAuthPage, isAuthResolved, navigate, userEmail]);
+
+    if (!isAuthPage && userEmail && userRole !== "admin") {
+      if (currentBuyer) {
+        void navigate({ to: "/buyer/shop", replace: true });
+        return;
+      }
+
+      void navigate({ to: "/buyer/shop", replace: true });
+    }
+  }, [
+    currentBuyer,
+    isAuthPage,
+    isAuthResolved,
+    isBuyerPage,
+    location.pathname,
+    navigate,
+    userEmail,
+    userRole,
+  ]);
 
   const handleSignOut = async () => {
     if (isMockAuthEnabled) {
       signOutMockAuth();
       setUserEmail(null);
       setUserName(null);
+      setUserRole(null);
       toast.success("Logged out successfully.");
       await navigate({ to: "/auth" });
       return;
@@ -199,11 +258,20 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
     setUserEmail(null);
     setUserName(null);
+    setUserRole(null);
     toast.success("Logged out successfully.");
     await navigate({ to: "/auth" });
   };
 
   if (isAuthPage) {
+    return (
+      <div className="min-h-dvh w-full overflow-x-hidden bg-background text-foreground">
+        {children}
+      </div>
+    );
+  }
+
+  if (isBuyerPage) {
     return (
       <div className="min-h-dvh w-full overflow-x-hidden bg-background text-foreground">
         {children}
@@ -224,7 +292,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="flex min-h-dvh w-full overflow-x-hidden bg-background text-foreground">
+    <div className="min-h-dvh w-full overflow-x-hidden bg-background text-foreground">
       {/* Mobile overlay */}
       {open && (
         <div className="fixed inset-0 z-30 bg-black/40 lg:hidden" onClick={() => setOpen(false)} />
@@ -233,7 +301,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
       {/* Sidebar */}
       <aside
         className={cn(
-          "fixed left-0 top-0 z-40 flex h-dvh w-64 shrink-0 flex-col bg-sidebar text-sidebar-foreground transition-transform lg:sticky lg:translate-x-0",
+          "fixed inset-y-0 left-0 z-40 flex h-dvh w-64 shrink-0 flex-col bg-sidebar text-sidebar-foreground transition-transform lg:translate-x-0",
           open ? "translate-x-0" : "-translate-x-full",
         )}
       >
@@ -296,7 +364,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
       </aside>
 
       {/* Main */}
-      <div className="flex min-h-dvh min-w-0 flex-1 flex-col overflow-x-hidden">
+      <div className="flex min-h-dvh min-w-0 flex-1 flex-col overflow-x-hidden lg:pl-64">
         <header className="sticky top-0 z-20 shrink-0 border-b border-border bg-background/90 backdrop-blur">
           <div className="mx-auto flex h-14 w-full max-w-[1400px] items-center gap-3 px-4 sm:px-6">
             <Button

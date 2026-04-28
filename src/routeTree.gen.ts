@@ -14,15 +14,23 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SalesRouteImport } from './routes/sales'
 import { Route as ReportsRouteImport } from './routes/reports'
 import { Route as ProductsRouteImport } from './routes/products'
+import { Route as OrdersRouteImport } from './routes/orders'
 import { Route as FactoriesRouteImport } from './routes/factories'
 import { Route as ExportsRouteImport } from './routes/exports'
 import { Route as DebtsRouteImport } from './routes/debts'
 import { Route as CustomersRouteImport } from './routes/customers'
 import { Route as CustomerPricesRouteImport } from './routes/customer-prices'
+import { Route as BuyerRouteImport } from './routes/buyer'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as BuyerIndexRouteImport } from './routes/buyer/index'
 import { Route as AuthIndexRouteImport } from './routes/auth/index'
 import { Route as CustomerPricesSetupRouteImport } from './routes/customer-prices/setup'
+import { Route as BuyerSignUpRouteImport } from './routes/buyer/sign-up'
+import { Route as BuyerShopRouteImport } from './routes/buyer/shop'
+import { Route as BuyerOrdersRouteImport } from './routes/buyer/orders'
+import { Route as BuyerInvoicesRouteImport } from './routes/buyer/invoices'
+import { Route as BuyerDebtRouteImport } from './routes/buyer/debt'
 import { Route as AuthSignUpRouteImport } from './routes/auth/sign-up'
 import { Route as AuthResetPasswordRouteImport } from './routes/auth/reset-password'
 import { Route as AuthForgotPasswordRouteImport } from './routes/auth/forgot-password'
@@ -53,6 +61,11 @@ const ProductsRoute = ProductsRouteImport.update({
   path: '/products',
   getParentRoute: () => rootRouteImport,
 } as any)
+const OrdersRoute = OrdersRouteImport.update({
+  id: '/orders',
+  path: '/orders',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const FactoriesRoute = FactoriesRouteImport.update({
   id: '/factories',
   path: '/factories',
@@ -78,6 +91,11 @@ const CustomerPricesRoute = CustomerPricesRouteImport.update({
   path: '/customer-prices',
   getParentRoute: () => rootRouteImport,
 } as any)
+const BuyerRoute = BuyerRouteImport.update({
+  id: '/buyer',
+  path: '/buyer',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
   path: '/auth',
@@ -88,6 +106,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const BuyerIndexRoute = BuyerIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => BuyerRoute,
+} as any)
 const AuthIndexRoute = AuthIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -97,6 +120,31 @@ const CustomerPricesSetupRoute = CustomerPricesSetupRouteImport.update({
   id: '/setup',
   path: '/setup',
   getParentRoute: () => CustomerPricesRoute,
+} as any)
+const BuyerSignUpRoute = BuyerSignUpRouteImport.update({
+  id: '/sign-up',
+  path: '/sign-up',
+  getParentRoute: () => BuyerRoute,
+} as any)
+const BuyerShopRoute = BuyerShopRouteImport.update({
+  id: '/shop',
+  path: '/shop',
+  getParentRoute: () => BuyerRoute,
+} as any)
+const BuyerOrdersRoute = BuyerOrdersRouteImport.update({
+  id: '/orders',
+  path: '/orders',
+  getParentRoute: () => BuyerRoute,
+} as any)
+const BuyerInvoicesRoute = BuyerInvoicesRouteImport.update({
+  id: '/invoices',
+  path: '/invoices',
+  getParentRoute: () => BuyerRoute,
+} as any)
+const BuyerDebtRoute = BuyerDebtRouteImport.update({
+  id: '/debt',
+  path: '/debt',
+  getParentRoute: () => BuyerRoute,
 } as any)
 const AuthSignUpRoute = AuthSignUpRouteImport.update({
   id: '/sign-up',
@@ -122,11 +170,13 @@ const AuthConfirmRoute = AuthConfirmRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRouteWithChildren
+  '/buyer': typeof BuyerRouteWithChildren
   '/customer-prices': typeof CustomerPricesRouteWithChildren
   '/customers': typeof CustomersRoute
   '/debts': typeof DebtsRoute
   '/exports': typeof ExportsRoute
   '/factories': typeof FactoriesRoute
+  '/orders': typeof OrdersRoute
   '/products': typeof ProductsRoute
   '/reports': typeof ReportsRoute
   '/sales': typeof SalesRoute
@@ -136,8 +186,14 @@ export interface FileRoutesByFullPath {
   '/auth/forgot-password': typeof AuthForgotPasswordRoute
   '/auth/reset-password': typeof AuthResetPasswordRoute
   '/auth/sign-up': typeof AuthSignUpRoute
+  '/buyer/debt': typeof BuyerDebtRoute
+  '/buyer/invoices': typeof BuyerInvoicesRoute
+  '/buyer/orders': typeof BuyerOrdersRoute
+  '/buyer/shop': typeof BuyerShopRoute
+  '/buyer/sign-up': typeof BuyerSignUpRoute
   '/customer-prices/setup': typeof CustomerPricesSetupRoute
   '/auth/': typeof AuthIndexRoute
+  '/buyer/': typeof BuyerIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -146,6 +202,7 @@ export interface FileRoutesByTo {
   '/debts': typeof DebtsRoute
   '/exports': typeof ExportsRoute
   '/factories': typeof FactoriesRoute
+  '/orders': typeof OrdersRoute
   '/products': typeof ProductsRoute
   '/reports': typeof ReportsRoute
   '/sales': typeof SalesRoute
@@ -155,18 +212,26 @@ export interface FileRoutesByTo {
   '/auth/forgot-password': typeof AuthForgotPasswordRoute
   '/auth/reset-password': typeof AuthResetPasswordRoute
   '/auth/sign-up': typeof AuthSignUpRoute
+  '/buyer/debt': typeof BuyerDebtRoute
+  '/buyer/invoices': typeof BuyerInvoicesRoute
+  '/buyer/orders': typeof BuyerOrdersRoute
+  '/buyer/shop': typeof BuyerShopRoute
+  '/buyer/sign-up': typeof BuyerSignUpRoute
   '/customer-prices/setup': typeof CustomerPricesSetupRoute
   '/auth': typeof AuthIndexRoute
+  '/buyer': typeof BuyerIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/auth': typeof AuthRouteWithChildren
+  '/buyer': typeof BuyerRouteWithChildren
   '/customer-prices': typeof CustomerPricesRouteWithChildren
   '/customers': typeof CustomersRoute
   '/debts': typeof DebtsRoute
   '/exports': typeof ExportsRoute
   '/factories': typeof FactoriesRoute
+  '/orders': typeof OrdersRoute
   '/products': typeof ProductsRoute
   '/reports': typeof ReportsRoute
   '/sales': typeof SalesRoute
@@ -176,19 +241,27 @@ export interface FileRoutesById {
   '/auth/forgot-password': typeof AuthForgotPasswordRoute
   '/auth/reset-password': typeof AuthResetPasswordRoute
   '/auth/sign-up': typeof AuthSignUpRoute
+  '/buyer/debt': typeof BuyerDebtRoute
+  '/buyer/invoices': typeof BuyerInvoicesRoute
+  '/buyer/orders': typeof BuyerOrdersRoute
+  '/buyer/shop': typeof BuyerShopRoute
+  '/buyer/sign-up': typeof BuyerSignUpRoute
   '/customer-prices/setup': typeof CustomerPricesSetupRoute
   '/auth/': typeof AuthIndexRoute
+  '/buyer/': typeof BuyerIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
     | '/auth'
+    | '/buyer'
     | '/customer-prices'
     | '/customers'
     | '/debts'
     | '/exports'
     | '/factories'
+    | '/orders'
     | '/products'
     | '/reports'
     | '/sales'
@@ -198,8 +271,14 @@ export interface FileRouteTypes {
     | '/auth/forgot-password'
     | '/auth/reset-password'
     | '/auth/sign-up'
+    | '/buyer/debt'
+    | '/buyer/invoices'
+    | '/buyer/orders'
+    | '/buyer/shop'
+    | '/buyer/sign-up'
     | '/customer-prices/setup'
     | '/auth/'
+    | '/buyer/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -208,6 +287,7 @@ export interface FileRouteTypes {
     | '/debts'
     | '/exports'
     | '/factories'
+    | '/orders'
     | '/products'
     | '/reports'
     | '/sales'
@@ -217,17 +297,25 @@ export interface FileRouteTypes {
     | '/auth/forgot-password'
     | '/auth/reset-password'
     | '/auth/sign-up'
+    | '/buyer/debt'
+    | '/buyer/invoices'
+    | '/buyer/orders'
+    | '/buyer/shop'
+    | '/buyer/sign-up'
     | '/customer-prices/setup'
     | '/auth'
+    | '/buyer'
   id:
     | '__root__'
     | '/'
     | '/auth'
+    | '/buyer'
     | '/customer-prices'
     | '/customers'
     | '/debts'
     | '/exports'
     | '/factories'
+    | '/orders'
     | '/products'
     | '/reports'
     | '/sales'
@@ -237,18 +325,26 @@ export interface FileRouteTypes {
     | '/auth/forgot-password'
     | '/auth/reset-password'
     | '/auth/sign-up'
+    | '/buyer/debt'
+    | '/buyer/invoices'
+    | '/buyer/orders'
+    | '/buyer/shop'
+    | '/buyer/sign-up'
     | '/customer-prices/setup'
     | '/auth/'
+    | '/buyer/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthRoute: typeof AuthRouteWithChildren
+  BuyerRoute: typeof BuyerRouteWithChildren
   CustomerPricesRoute: typeof CustomerPricesRouteWithChildren
   CustomersRoute: typeof CustomersRoute
   DebtsRoute: typeof DebtsRoute
   ExportsRoute: typeof ExportsRoute
   FactoriesRoute: typeof FactoriesRoute
+  OrdersRoute: typeof OrdersRoute
   ProductsRoute: typeof ProductsRoute
   ReportsRoute: typeof ReportsRoute
   SalesRoute: typeof SalesRoute
@@ -293,6 +389,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProductsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/orders': {
+      id: '/orders'
+      path: '/orders'
+      fullPath: '/orders'
+      preLoaderRoute: typeof OrdersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/factories': {
       id: '/factories'
       path: '/factories'
@@ -328,6 +431,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CustomerPricesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/buyer': {
+      id: '/buyer'
+      path: '/buyer'
+      fullPath: '/buyer'
+      preLoaderRoute: typeof BuyerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/auth': {
       id: '/auth'
       path: '/auth'
@@ -342,6 +452,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/buyer/': {
+      id: '/buyer/'
+      path: '/'
+      fullPath: '/buyer/'
+      preLoaderRoute: typeof BuyerIndexRouteImport
+      parentRoute: typeof BuyerRoute
+    }
     '/auth/': {
       id: '/auth/'
       path: '/'
@@ -355,6 +472,41 @@ declare module '@tanstack/react-router' {
       fullPath: '/customer-prices/setup'
       preLoaderRoute: typeof CustomerPricesSetupRouteImport
       parentRoute: typeof CustomerPricesRoute
+    }
+    '/buyer/sign-up': {
+      id: '/buyer/sign-up'
+      path: '/sign-up'
+      fullPath: '/buyer/sign-up'
+      preLoaderRoute: typeof BuyerSignUpRouteImport
+      parentRoute: typeof BuyerRoute
+    }
+    '/buyer/shop': {
+      id: '/buyer/shop'
+      path: '/shop'
+      fullPath: '/buyer/shop'
+      preLoaderRoute: typeof BuyerShopRouteImport
+      parentRoute: typeof BuyerRoute
+    }
+    '/buyer/orders': {
+      id: '/buyer/orders'
+      path: '/orders'
+      fullPath: '/buyer/orders'
+      preLoaderRoute: typeof BuyerOrdersRouteImport
+      parentRoute: typeof BuyerRoute
+    }
+    '/buyer/invoices': {
+      id: '/buyer/invoices'
+      path: '/invoices'
+      fullPath: '/buyer/invoices'
+      preLoaderRoute: typeof BuyerInvoicesRouteImport
+      parentRoute: typeof BuyerRoute
+    }
+    '/buyer/debt': {
+      id: '/buyer/debt'
+      path: '/debt'
+      fullPath: '/buyer/debt'
+      preLoaderRoute: typeof BuyerDebtRouteImport
+      parentRoute: typeof BuyerRoute
     }
     '/auth/sign-up': {
       id: '/auth/sign-up'
@@ -405,6 +557,26 @@ const AuthRouteChildren: AuthRouteChildren = {
 
 const AuthRouteWithChildren = AuthRoute._addFileChildren(AuthRouteChildren)
 
+interface BuyerRouteChildren {
+  BuyerDebtRoute: typeof BuyerDebtRoute
+  BuyerInvoicesRoute: typeof BuyerInvoicesRoute
+  BuyerOrdersRoute: typeof BuyerOrdersRoute
+  BuyerShopRoute: typeof BuyerShopRoute
+  BuyerSignUpRoute: typeof BuyerSignUpRoute
+  BuyerIndexRoute: typeof BuyerIndexRoute
+}
+
+const BuyerRouteChildren: BuyerRouteChildren = {
+  BuyerDebtRoute: BuyerDebtRoute,
+  BuyerInvoicesRoute: BuyerInvoicesRoute,
+  BuyerOrdersRoute: BuyerOrdersRoute,
+  BuyerShopRoute: BuyerShopRoute,
+  BuyerSignUpRoute: BuyerSignUpRoute,
+  BuyerIndexRoute: BuyerIndexRoute,
+}
+
+const BuyerRouteWithChildren = BuyerRoute._addFileChildren(BuyerRouteChildren)
+
 interface CustomerPricesRouteChildren {
   CustomerPricesSetupRoute: typeof CustomerPricesSetupRoute
 }
@@ -420,11 +592,13 @@ const CustomerPricesRouteWithChildren = CustomerPricesRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthRoute: AuthRouteWithChildren,
+  BuyerRoute: BuyerRouteWithChildren,
   CustomerPricesRoute: CustomerPricesRouteWithChildren,
   CustomersRoute: CustomersRoute,
   DebtsRoute: DebtsRoute,
   ExportsRoute: ExportsRoute,
   FactoriesRoute: FactoriesRoute,
+  OrdersRoute: OrdersRoute,
   ProductsRoute: ProductsRoute,
   ReportsRoute: ReportsRoute,
   SalesRoute: SalesRoute,

@@ -56,6 +56,18 @@ export interface Customer {
   notes?: string;
 }
 
+export interface BuyerAccount {
+  id: string;
+  email: string;
+  passwordDigest: string;
+  name: string;
+  phone?: string;
+  market: string;
+  location: string;
+  customerId: string;
+  createdAt: string;
+}
+
 export interface StockInItem {
   productId: string;
   quantity: number;
@@ -99,6 +111,30 @@ export interface Sale {
   notes?: string;
 }
 
+export type BuyerOrderStatus = "pending" | "confirmed" | "packing" | "completed" | "cancelled";
+
+export interface BuyerOrderItem {
+  productId: string;
+  quantity: number;
+  unit?: UnitType;
+  stockQuantity: number;
+  estimatedUnitPrice?: number;
+}
+
+export interface BuyerOrder {
+  id: string;
+  orderNumber: string;
+  buyerId: string;
+  customerId: string;
+  date: string;
+  updatedAt: string;
+  status: BuyerOrderStatus;
+  items: BuyerOrderItem[];
+  totalEstimate: number;
+  notes?: string;
+  sellerNote?: string;
+}
+
 export interface CustomerPrice {
   customerId: string;
   productId: string;
@@ -121,6 +157,9 @@ export interface AppState {
   products: Product[];
   factories: Factory[];
   customers: Customer[];
+  buyerAccounts: BuyerAccount[];
+  buyerOrders: BuyerOrder[];
+  buyerSessionId?: string;
   stockIns: StockInInvoice[];
   sales: Sale[];
   customerPrices: CustomerPrice[];

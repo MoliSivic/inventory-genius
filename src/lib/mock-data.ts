@@ -230,6 +230,20 @@ const seedCustomers: AppState["customers"] = [
   },
 ];
 
+const seedBuyerAccounts: AppState["buyerAccounts"] = [
+  {
+    id: "buyer_demo",
+    email: "customer@gmail.com",
+    passwordDigest: "local-1ueva4x-11",
+    name: "Sok Dara",
+    phone: "+855 11 111 222",
+    market: "Central Market",
+    location: "Central Market, near gate 2",
+    customerId: "c1",
+    createdAt: "2026-04-28T00:00:00.000Z",
+  },
+];
+
 export const LEGACY_SAMPLE_PRODUCT_IDS = [
   "p1",
   "p2",
@@ -747,6 +761,9 @@ export const seedData: AppState = {
   products: seedProducts,
   factories: seedFactories,
   customers: seedCustomers,
+  buyerAccounts: seedBuyerAccounts,
+  buyerOrders: [],
+  buyerSessionId: undefined,
   stockIns: seedStockIns,
   sales: seedSales,
   customerPrices: seedCustomerPrices,

@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import {
   getAuthRedirectUrl,
   getSupabaseClient,
+  getSupabaseUserProfile,
   getSupabaseUnavailableMessage,
   isSupabaseReady,
 } from "@/lib/supabase";
@@ -64,8 +65,15 @@ function SignUpPage() {
       }
 
       if (data.session) {
+        const profile = await getSupabaseUserProfile(data.session.user);
+
         toast.success("Account created and signed in.");
-        await navigate({ to: "/" });
+        if (profile.role === "admin") {
+          await navigate({ to: "/" });
+          return;
+        }
+
+        await navigate({ to: "/buyer/shop" });
         return;
       }
 
