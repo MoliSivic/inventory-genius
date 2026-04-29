@@ -86,7 +86,17 @@ function BuyerLayout() {
   useEffect(() => {
     if (!isSupabaseAuthResolved) return;
 
-    if (!currentBuyer && authEmail) {
+    const normalizedAuthEmail = authEmail?.trim().toLocaleLowerCase() ?? null;
+    const isDifferentCustomer =
+      normalizedAuthEmail && currentBuyer?.email.trim().toLocaleLowerCase() !== normalizedAuthEmail;
+
+    if (isSupabaseReady && !normalizedAuthEmail) {
+      signOutBuyer();
+      void navigate({ to: "/auth", replace: true });
+      return;
+    }
+
+    if (normalizedAuthEmail && (!currentBuyer || isDifferentCustomer)) {
       const result = signInBuyerByEmail(authEmail, authName);
 
       if (result.ok) return;
@@ -112,6 +122,7 @@ function BuyerLayout() {
     location.pathname,
     navigate,
     signInBuyerByEmail,
+    signOutBuyer,
   ]);
 
   const handleSignOut = async () => {

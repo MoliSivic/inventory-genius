@@ -34,9 +34,15 @@ function SignInPage() {
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setErrorMessage("");
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (normalizedEmail.endsWith(".dom")) {
+      setErrorMessage('Please check your email address. Did you mean ".com" instead of ".dom"?');
+      return;
+    }
 
     if (isMockAuthEnabled) {
-      const buyerResult = signInBuyer(email, password);
+      const buyerResult = signInBuyer(normalizedEmail, password);
 
       if (buyerResult.ok) {
         toast.success("Signed in as customer.");
@@ -44,7 +50,7 @@ function SignInPage() {
         return;
       }
 
-      const result = signInWithMockCredentials(email, password);
+      const result = signInWithMockCredentials(normalizedEmail, password);
 
       if (!result.ok) {
         setErrorMessage(
@@ -68,7 +74,7 @@ function SignInPage() {
     try {
       const supabase = getSupabaseClient();
       const { data, error } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
+        email: normalizedEmail,
         password,
       });
 

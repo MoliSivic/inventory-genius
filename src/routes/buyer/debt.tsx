@@ -72,12 +72,6 @@ function BuyerDebtPage() {
                     <StatusBadge status={sale.paymentStatus} />
                   </div>
 
-                  <div className="mt-3 grid grid-cols-3 gap-2 rounded-md bg-muted p-3 text-sm">
-                    <MoneyCell label="Total" value={sale.total} />
-                    <MoneyCell label="Paid" value={sale.paidAmount} />
-                    <MoneyCell label="Need pay" value={balance} danger />
-                  </div>
-
                   <div className="mt-3 space-y-2">
                     {sale.items.map((item) => {
                       const product = state.products.find(
@@ -101,6 +95,12 @@ function BuyerDebtPage() {
                         </div>
                       );
                     })}
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-3 gap-2 rounded-md bg-muted p-3 text-sm">
+                    <MoneyCell label="Total" value={sale.total} />
+                    <MoneyCell label="Paid" value={sale.paidAmount} />
+                    <MoneyCell label="Need pay" value={balance} danger />
                   </div>
                 </article>
               );

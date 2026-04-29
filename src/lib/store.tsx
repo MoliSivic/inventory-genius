@@ -50,6 +50,7 @@ import {
 } from "./remote-state";
 
 const STORAGE_KEY = "wms_state_v1";
+const BUYER_SESSION_STORAGE_KEY = "inventory_genius_buyer_session_id";
 const FALLBACK_CATEGORY_NAME = "ផ្សេងៗ";
 const FALLBACK_MARKET_NAME = "ផ្សេងៗ";
 const LEGACY_SAMPLE_PRODUCT_ID_SET = new Set<string>(LEGACY_SAMPLE_PRODUCT_IDS);
@@ -958,9 +959,7 @@ function normalizeAppState(state: AppState): AppState {
     customers,
     buyerAccounts,
     buyerOrders,
-    buyerSessionId: buyerAccounts.some((buyer) => buyer.id === prunedState.buyerSessionId)
-      ? prunedState.buyerSessionId
-      : undefined,
+    buyerSessionId: undefined,
     factories,
     markets: normalizeMarkets(prunedState.markets, [...customers, ...buyerAccounts]),
     products,
@@ -1040,6 +1039,16 @@ function getBuyerPasswordDigest(password: string) {
     hash = (hash * 33) ^ password.charCodeAt(index);
   }
   return `local-${(hash >>> 0).toString(36)}-${password.length}`;
+}
+
+function loadBuyerSessionId() {
+  if (typeof window === "undefined") return undefined;
+
+  try {
+    return localStorage.getItem(BUYER_SESSION_STORAGE_KEY) || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 interface StoreContextValue {
@@ -1152,6 +1161,7 @@ const StoreContext = createContext<StoreContextValue | null>(null);
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AppState>(seedData);
+  const [buyerSessionId, setBuyerSessionId] = useState<string | undefined>(loadBuyerSessionId);
   const [hydrated, setHydrated] = useState(false);
   const applyingRemoteStateRef = useRef(false);
   const latestSerializedStateRef = useRef(JSON.stringify(seedData));
@@ -1195,6 +1205,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     latestSerializedStateRef.current = JSON.stringify(state);
   }, [state]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    try {
+      if (buyerSessionId) {
+        localStorage.setItem(BUYER_SESSION_STORAGE_KEY, buyerSessionId);
+      } else {
+        localStorage.removeItem(BUYER_SESSION_STORAGE_KEY);
+      }
+    } catch {
+      /* ignore quota */
+    }
+  }, [buyerSessionId]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -1672,15 +1696,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         markets: matchedMarket ? s.markets : [...s.markets, nextMarketName],
         customers: [...s.customers, customer],
         buyerAccounts: [...s.buyerAccounts, buyer],
-        buyerSessionId: buyer.id,
       };
     });
+
+    if (result.ok) setBuyerSessionId(result.buyer.id);
 
     return result;
   }, []);
 
   const signInBuyer: StoreContextValue["signInBuyer"] = useCallback((email, password) => {
     let result: StoreResult = { ok: false, error: "Invalid email or password." };
+    let nextBuyerSessionId: string | undefined;
 
     setState((s) => {
       const buyer = s.buyerAccounts.find((account) => account.email === normalizeEmail(email));
@@ -1691,14 +1717,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
 
       result = { ok: true };
-      return { ...s, buyerSessionId: buyer.id };
+      nextBuyerSessionId = buyer.id;
+      return s;
     });
+
+    if (result.ok) setBuyerSessionId(nextBuyerSessionId);
 
     return result;
   }, []);
 
   const signInBuyerByEmail: StoreContextValue["signInBuyerByEmail"] = useCallback((email, name) => {
     let result: StoreResult = { ok: false, error: "Enter a valid email address." };
+    let nextBuyerSessionId: string | undefined;
 
     setState((s) => {
       const normalizedEmail = normalizeEmail(email);
@@ -1713,8 +1743,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
       if (buyer) {
         result = { ok: true };
+        nextBuyerSessionId = buyer.id;
         if (buyer.name === displayName) {
-          return { ...s, buyerSessionId: buyer.id };
+          return s;
         }
 
         return {
@@ -1725,7 +1756,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           customers: s.customers.map((customer) =>
             customer.id === buyer.customerId ? { ...customer, name: displayName } : customer,
           ),
-          buyerSessionId: buyer.id,
         };
       }
 
@@ -1751,92 +1781,97 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       };
 
       result = { ok: true };
+      nextBuyerSessionId = newBuyer.id;
       return {
         ...s,
         customers: [...s.customers, customer],
         buyerAccounts: [...s.buyerAccounts, newBuyer],
-        buyerSessionId: newBuyer.id,
       };
     });
+
+    if (result.ok) setBuyerSessionId(nextBuyerSessionId);
 
     return result;
   }, []);
 
   const signOutBuyer: StoreContextValue["signOutBuyer"] = useCallback(() => {
-    setState((s) => ({ ...s, buyerSessionId: undefined }));
+    setBuyerSessionId(undefined);
   }, []);
 
-  const updateBuyerProfile: StoreContextValue["updateBuyerProfile"] = useCallback((data) => {
-    let result: StoreResult = { ok: false, error: "Unknown error" };
+  const updateBuyerProfile: StoreContextValue["updateBuyerProfile"] = useCallback(
+    (data) => {
+      let result: StoreResult = { ok: false, error: "Unknown error" };
 
-    setState((s) => {
-      const buyer = s.buyerAccounts.find((account) => account.id === s.buyerSessionId);
-      if (!buyer) {
-        result = { ok: false, error: "Please sign in again." };
-        return s;
-      }
+      setState((s) => {
+        const buyer = s.buyerAccounts.find((account) => account.id === buyerSessionId);
+        if (!buyer) {
+          result = { ok: false, error: "Please sign in again." };
+          return s;
+        }
 
-      const name = data.name.trim();
-      const phone = data.phone?.trim() || undefined;
-      const telegram = data.telegram?.trim() ? normalizeTelegramValue(data.telegram) : undefined;
-      const location = data.location?.trim() ?? "";
-      const marketName = normalizeMarketName(data.market);
+        const name = data.name.trim();
+        const phone = data.phone?.trim() || undefined;
+        const telegram = data.telegram?.trim() ? normalizeTelegramValue(data.telegram) : undefined;
+        const location = data.location?.trim() ?? "";
+        const marketName = normalizeMarketName(data.market);
 
-      if (!name) {
-        result = { ok: false, error: "Name is required." };
-        return s;
-      }
+        if (!name) {
+          result = { ok: false, error: "Name is required." };
+          return s;
+        }
 
-      if (!marketName) {
-        result = { ok: false, error: "Choose your market before ordering." };
-        return s;
-      }
+        if (!marketName) {
+          result = { ok: false, error: "Choose your market before ordering." };
+          return s;
+        }
 
-      const matchedMarket = s.markets.find((market) => sameMarketName(market, marketName));
-      if (!matchedMarket) {
-        result = { ok: false, error: "Choose a market from the seller list." };
-        return s;
-      }
+        const matchedMarket = s.markets.find((market) => sameMarketName(market, marketName));
+        if (!matchedMarket) {
+          result = { ok: false, error: "Choose a market from the seller list." };
+          return s;
+        }
 
-      if (telegram && !getTelegramUrl(telegram)) {
-        result = { ok: false, error: "Enter a valid Telegram username or link." };
-        return s;
-      }
+        if (telegram && !getTelegramUrl(telegram)) {
+          result = { ok: false, error: "Enter a valid Telegram username or link." };
+          return s;
+        }
 
-      result = { ok: true };
-      return {
-        ...s,
-        buyerAccounts: s.buyerAccounts.map((account) =>
-          account.id === buyer.id
-            ? {
-                ...account,
-                name,
-                phone,
-                telegram,
-                market: matchedMarket,
-                location,
-              }
-            : account,
-        ),
-        customers: s.customers.map((customer) =>
-          customer.id === buyer.customerId
-            ? {
-                ...customer,
-                name,
-                phone: phone ?? "",
-                telegram,
-                market: matchedMarket,
-                notes: location
-                  ? `Supabase customer account: ${buyer.email}. Location: ${location}`
-                  : customer.notes,
-              }
-            : customer,
-        ),
-      };
-    });
+        result = { ok: true };
+        return {
+          ...s,
+          buyerAccounts: s.buyerAccounts.map((account) =>
+            account.id === buyer.id
+              ? {
+                  ...account,
+                  name,
+                  phone,
+                  telegram,
+                  market: matchedMarket,
+                  location,
+                }
+              : account,
+          ),
+          customers: s.customers.map((customer) =>
+            customer.id === buyer.customerId
+              ? {
+                  ...customer,
+                  name,
+                  phone: phone ?? "",
+                  telegram,
+                  market: matchedMarket,
+                  notes: location
+                    ? `Supabase customer account: ${buyer.email}. Location: ${location}`
+                    : customer.notes,
+                }
+              : customer,
+          ),
+        };
+      });
 
-    return result;
-  }, []);
+      return result;
+    },
+    [buyerSessionId],
+  );
 
   const addBuyerOrder: StoreContextValue["addBuyerOrder"] = useCallback((data) => {
     let result: BuyerOrder | { error: string } = { error: "Unknown error" };
@@ -2366,8 +2401,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const currentBuyer = useMemo(
-    () => state.buyerAccounts.find((buyer) => buyer.id === state.buyerSessionId) ?? null,
-    [state.buyerAccounts, state.buyerSessionId],
+    () => state.buyerAccounts.find((buyer) => buyer.id === buyerSessionId) ?? null,
+    [buyerSessionId, state.buyerAccounts],
   );
 
   const value = useMemo<StoreContextValue>(
