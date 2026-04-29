@@ -4,6 +4,7 @@ import {
   ClipboardList,
   PackageCheck,
   Search,
+  Wallet,
   WalletCards,
   XCircle,
 } from "lucide-react";
@@ -11,7 +12,16 @@ import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -23,17 +33,23 @@ import { PageHeader, PageSection } from "@/components/app/StatCard";
 import { fmtMoney, useStore } from "@/lib/store";
 import type { BuyerOrder, BuyerOrderStatus, PaymentStatus } from "@/lib/types";
 import { primaryUnit } from "@/lib/units";
-import { cn } from "@/lib/utils";
+import { cn, displayZeroAsPlaceholder, parseNumericInput } from "@/lib/utils";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/orders")({
   component: OrdersPage,
 });
 
-const ALL_STATUS = "all";
 const ALL_MARKETS = "all";
-const ALL_PAYMENT = "all";
 type OrdersView = "loading" | "control";
+type WeekWindow = "1" | "2" | "3" | "all";
+
+const weekWindowLabels: Record<WeekWindow, string> = {
+  "1": "Last 1 week",
+  "2": "Last 2 weeks",
+  "3": "Last 3 weeks",
+  all: "All active orders",
+};
 
 const statusLabels: Record<BuyerOrderStatus, string> = {
   pending: "Pending",
@@ -63,14 +79,26 @@ const paymentClasses: Record<PaymentStatus, string> = {
   unpaid: "bg-destructive/15 text-destructive",
 };
 
-const loadableStatuses = new Set<BuyerOrderStatus>(["confirmed", "packing"]);
+const routeStatuses = new Set<BuyerOrderStatus>(["pending", "confirmed", "packing"]);
+
+function isInsideWeekWindow(date: string, window: WeekWindow) {
+  if (window === "all") return true;
+
+  const timestamp = new Date(date).getTime();
+  if (Number.isNaN(timestamp)) return false;
+
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - Number(window) * 7);
+
+  return timestamp >= start.getTime();
+}
 
 function OrdersPage() {
   const { state, addSale, updateBuyerOrderPayment, updateBuyerOrderStatus } = useStore();
   const [search, setSearch] = useState("");
-  const [status, setStatus] = useState<typeof ALL_STATUS | BuyerOrderStatus>(ALL_STATUS);
   const [market, setMarket] = useState(ALL_MARKETS);
-  const [payment, setPayment] = useState<typeof ALL_PAYMENT | PaymentStatus>(ALL_PAYMENT);
+  const [weekWindow, setWeekWindow] = useState<WeekWindow>("1");
   const [checkedLoadingItems, setCheckedLoadingItems] = useState<Record<string, boolean>>({});
   const [view, setView] = useState<OrdersView>("control");
 
@@ -100,12 +128,10 @@ function OrdersPage() {
     const query = search.trim().toLocaleLowerCase();
 
     return state.buyerOrders
-      .filter((order) => status === ALL_STATUS || order.status === status)
       .filter((order) => {
         if (market === ALL_MARKETS) return true;
         return orderMarkets.get(order.id) === market;
       })
-      .filter((order) => payment === ALL_PAYMENT || order.paymentStatus === payment)
       .filter((order) => {
         if (!query) return true;
         const buyer = state.buyerAccounts.find((account) => account.id === order.buyerId);
@@ -123,30 +149,31 @@ function OrdersPage() {
           .toLocaleLowerCase();
         return haystack.includes(query);
       });
-  }, [
-    market,
-    orderMarkets,
-    payment,
-    search,
-    state.buyerAccounts,
-    state.buyerOrders,
-    state.customers,
-    status,
-  ]);
+  }, [market, orderMarkets, search, state.buyerAccounts, state.buyerOrders, state.customers]);
 
   const pendingCount = state.buyerOrders.filter((order) => order.status === "pending").length;
   const loadableOrders = useMemo(
-    () => state.buyerOrders.filter((order) => loadableStatuses.has(order.status)),
-    [state.buyerOrders],
+    () =>
+      state.buyerOrders.filter(
+        (order) =>
+          routeStatuses.has(order.status) &&
+          !order.saleId &&
+          isInsideWeekWindow(order.date, weekWindow),
+      ),
+    [state.buyerOrders, weekWindow],
   );
   const loadableCount = loadableOrders.length;
   const routeMarketSummaries = useMemo(() => {
     const summaries = new Map<
       string,
       {
+        confirmedCount: number;
         market: string;
         orderCount: number;
+        packingCount: number;
+        pendingCount: number;
         productKeys: Set<string>;
+        totalValue: number;
       }
     >();
 
@@ -157,14 +184,27 @@ function OrdersPage() {
         ({
           market: orderMarket,
           orderCount: 0,
+          pendingCount: 0,
+          confirmedCount: 0,
+          packingCount: 0,
           productKeys: new Set<string>(),
+          totalValue: 0,
         } satisfies {
+          confirmedCount: number;
           market: string;
           orderCount: number;
+          packingCount: number;
+          pendingCount: number;
           productKeys: Set<string>;
+          totalValue: number;
         });
 
       current.orderCount += 1;
+      current.totalValue += order.totalEstimate;
+
+      if (order.status === "pending") current.pendingCount += 1;
+      if (order.status === "confirmed") current.confirmedCount += 1;
+      if (order.status === "packing") current.packingCount += 1;
 
       for (const item of order.items) {
         const product = state.products.find((candidate) => candidate.id === item.productId);
@@ -194,7 +234,9 @@ function OrdersPage() {
         orderIds: Set<string>;
         productName: string;
         quantity: number;
+        routeValue: number;
         stockQuantity: number;
+        stockAvailable: number;
         stockUnit: string;
         unit: string;
       }
@@ -215,7 +257,9 @@ function OrdersPage() {
             orderIds: new Set<string>(),
             productName,
             quantity: 0,
+            routeValue: 0,
             stockQuantity: 0,
+            stockAvailable: product?.stock ?? 0,
             stockUnit,
             unit,
           } satisfies {
@@ -224,12 +268,15 @@ function OrdersPage() {
             orderIds: Set<string>;
             productName: string;
             quantity: number;
+            routeValue: number;
             stockQuantity: number;
+            stockAvailable: number;
             stockUnit: string;
             unit: string;
           });
 
         current.quantity += item.quantity;
+        current.routeValue += (item.estimatedUnitPrice ?? 0) * item.quantity;
         current.stockQuantity += item.stockQuantity;
         current.orderIds.add(order.id);
         summary.set(key, current);
@@ -240,9 +287,26 @@ function OrdersPage() {
   }, [market, state.products, truckOrders]);
 
   const checkedLoadingCount = loadingSummary.filter((item) => checkedLoadingItems[item.key]).length;
+  const allLoadingChecked =
+    loadingSummary.length > 0 && checkedLoadingCount === loadingSummary.length;
+  const uncheckedLoadingCount = Math.max(loadingSummary.length - checkedLoadingCount, 0);
+  const routeTotal = truckOrders.reduce((total, order) => total + order.totalEstimate, 0);
+  const routeOrderCounts = truckOrders.reduce(
+    (counts, order) => ({
+      pending: counts.pending + (order.status === "pending" ? 1 : 0),
+      confirmed: counts.confirmed + (order.status === "confirmed" ? 1 : 0),
+      packing: counts.packing + (order.status === "packing" ? 1 : 0),
+    }),
+    { pending: 0, confirmed: 0, packing: 0 },
+  );
 
   const selectMarket = (nextMarket: string) => {
     setMarket(nextMarket);
+    setCheckedLoadingItems({});
+  };
+
+  const selectWeekWindow = (nextWindow: WeekWindow) => {
+    setWeekWindow(nextWindow);
     setCheckedLoadingItems({});
   };
 
@@ -253,11 +317,103 @@ function OrdersPage() {
     }));
   };
 
-  const clearFilters = () => {
-    setSearch("");
-    setStatus(ALL_STATUS);
-    selectMarket(ALL_MARKETS);
-    setPayment(ALL_PAYMENT);
+  const setAllLoadingItems = (checked: boolean) => {
+    if (!checked) {
+      setCheckedLoadingItems({});
+      return;
+    }
+
+    setCheckedLoadingItems(
+      Object.fromEntries(loadingSummary.map((item) => [item.key, true])) as Record<string, boolean>,
+    );
+  };
+
+  const completeTruckLoading = () => {
+    if (market === ALL_MARKETS || truckOrders.length === 0) {
+      toast.error("Choose one market route before loading the truck.");
+      return;
+    }
+
+    if (!allLoadingChecked) {
+      toast.error("Check every product in the truck loading list first.");
+      return;
+    }
+
+    const ordersToLoad = truckOrders.filter((order) => routeStatuses.has(order.status));
+    if (ordersToLoad.length === 0) {
+      toast.error("No active orders to load for this market.");
+      return;
+    }
+
+    const orderWithoutPrice = ordersToLoad.find((order) =>
+      order.items.some((item) => item.estimatedUnitPrice === undefined),
+    );
+    if (orderWithoutPrice) {
+      toast.error(`Confirm every product price before loading ${orderWithoutPrice.orderNumber}.`);
+      return;
+    }
+
+    const stockByProduct = new Map<string, number>();
+    for (const order of ordersToLoad) {
+      for (const item of order.items) {
+        stockByProduct.set(
+          item.productId,
+          (stockByProduct.get(item.productId) ?? 0) + item.stockQuantity,
+        );
+      }
+    }
+
+    for (const [productId, quantity] of stockByProduct.entries()) {
+      const product = state.products.find((item) => item.id === productId);
+      if (!product) {
+        toast.error("Product not found.");
+        return;
+      }
+
+      if (quantity > product.stock) {
+        toast.error(
+          `Not enough stock for ${product.name} (need ${quantity}, have ${product.stock}).`,
+        );
+        return;
+      }
+    }
+
+    let createdCount = 0;
+    for (const order of ordersToLoad) {
+      const sale = addSale({
+        customerId: order.customerId,
+        date: new Date().toISOString().slice(0, 10),
+        items: order.items.map((item) => ({
+          productId: item.productId,
+          quantity: item.quantity,
+          unit: item.unit,
+          unitPrice: item.estimatedUnitPrice ?? 0,
+        })),
+        paidAmount: 0,
+        paymentStatus: "unpaid",
+        notes: [order.orderNumber, `Loaded to ${market} truck`, order.notes]
+          .filter(Boolean)
+          .join(" - "),
+      });
+
+      if ("error" in sale) {
+        toast.error(sale.error);
+        return;
+      }
+
+      updateBuyerOrderStatus(
+        order.id,
+        "completed",
+        `Loaded to ${market} truck. Receipt ${sale.receiptNumber} created.`,
+        sale.id,
+      );
+      createdCount += 1;
+    }
+
+    setCheckedLoadingItems({});
+    toast.success(
+      `${createdCount} receipt${createdCount === 1 ? "" : "s"} created for ${market}. Payment can be updated after delivery.`,
+    );
   };
 
   const completeOrderAsSale = (order: BuyerOrder) => {
@@ -316,24 +472,24 @@ function OrdersPage() {
         description="Orders sent from the customer mobile app."
         actions={
           <div className="flex flex-wrap items-center justify-end gap-2">
-            <div className="flex rounded-md border border-border bg-background p-1">
-              <Button
-                type="button"
-                size="sm"
-                variant={view === "loading" ? "default" : "ghost"}
-                onClick={() => setView("loading")}
-              >
-                Truck Loading Summary ({loadableCount})
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant={view === "control" ? "default" : "ghost"}
-                onClick={() => setView("control")}
-              >
-                Order Control ({pendingCount})
-              </Button>
-            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant={view === "loading" ? "default" : "outline"}
+              className="h-10 px-4"
+              onClick={() => setView("loading")}
+            >
+              Truck Loading Summary ({loadableCount})
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={view === "control" ? "default" : "outline"}
+              className="h-10 px-4"
+              onClick={() => setView("control")}
+            >
+              Order Control ({pendingCount})
+            </Button>
             <div className="rounded-md bg-primary/15 px-3 py-2 text-sm font-semibold text-primary">
               {loadableCount} to load
             </div>
@@ -349,38 +505,65 @@ function OrdersPage() {
           title="Truck Loading Summary"
           description={
             market === ALL_MARKETS
-              ? "Only confirmed and packing orders appear here. Choose one market route."
-              : `Combined active orders for ${market}.`
+              ? `Active customer orders from ${weekWindowLabels[weekWindow].toLowerCase()}. Choose one market route.`
+              : `Combined ${weekWindowLabels[weekWindow].toLowerCase()} orders for ${market}.`
           }
           actions={
             <div className="flex flex-wrap items-center justify-end gap-2 text-sm">
-              <span className="rounded-md bg-primary/15 px-3 py-2 font-semibold text-primary">
-                {market === ALL_MARKETS ? "Select market" : `${truckOrders.length} to load`}
-              </span>
-              <span className="rounded-md bg-muted px-3 py-2 font-semibold text-muted-foreground">
-                {loadingSummary.length} products
-              </span>
-              {loadingSummary.length > 0 && (
-                <span className="rounded-md bg-success/15 px-3 py-2 font-semibold text-success">
-                  {checkedLoadingCount}/{loadingSummary.length} checked
-                </span>
+              {loadingSummary.length > 0 && !allLoadingChecked && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setAllLoadingItems(true)}
+                >
+                  Mark all loaded
+                </Button>
               )}
               {checkedLoadingCount > 0 && (
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => setCheckedLoadingItems({})}
+                  onClick={() => setAllLoadingItems(false)}
                 >
                   Reset
+                </Button>
+              )}
+              {loadingSummary.length > 0 && (
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={!allLoadingChecked}
+                  onClick={completeTruckLoading}
+                >
+                  Confirm loaded & create receipts
                 </Button>
               )}
             </div>
           }
         >
-          <div className="mb-4 grid gap-3 lg:grid-cols-[280px_minmax(0,1fr)] lg:items-start">
-            <div>
-              <p className="mb-2 text-sm font-semibold">Delivery market</p>
+          <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-[240px_280px_minmax(0,1fr)]">
+            <div className="space-y-2">
+              <p className="text-sm font-semibold">Order window</p>
+              <Select
+                value={weekWindow}
+                onValueChange={(value) => selectWeekWindow(value as WeekWindow)}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="1">Last 1 week</SelectItem>
+                  <SelectItem value="2">Last 2 weeks</SelectItem>
+                  <SelectItem value="3">Last 3 weeks</SelectItem>
+                  <SelectItem value="all">All active orders</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-sm font-semibold">Delivery market</p>
               <Select value={market} onValueChange={selectMarket}>
                 <SelectTrigger>
                   <SelectValue />
@@ -394,12 +577,9 @@ function OrdersPage() {
                   ))}
                 </SelectContent>
               </Select>
-              <p className="mt-2 text-xs text-muted-foreground">
-                The truck checklist combines one market only.
-              </p>
             </div>
 
-            <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
+            <div className="grid grid-cols-1 gap-2 md:col-span-2 xl:col-span-1 xl:grid-cols-2">
               {routeMarketSummaries.map((summary) => (
                 <button
                   key={summary.market}
@@ -416,27 +596,67 @@ function OrdersPage() {
                       {summary.productKeys.size} products
                     </Badge>
                   </div>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {summary.orderCount} confirmed order(s)
-                  </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <span>{summary.orderCount} orders</span>
+                    <span>{fmtMoney(summary.totalValue)}</span>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {summary.pendingCount > 0 && (
+                      <Badge className="border-transparent bg-warning/20 text-warning-foreground">
+                        {summary.pendingCount} pending
+                      </Badge>
+                    )}
+                    {summary.confirmedCount > 0 && (
+                      <Badge className="border-transparent bg-primary/15 text-primary">
+                        {summary.confirmedCount} confirmed
+                      </Badge>
+                    )}
+                    {summary.packingCount > 0 && (
+                      <Badge className="border-transparent bg-secondary text-secondary-foreground">
+                        {summary.packingCount} packing
+                      </Badge>
+                    )}
+                  </div>
                 </button>
               ))}
             </div>
           </div>
 
+          {market !== ALL_MARKETS && (
+            <div className="mb-4 grid grid-cols-2 gap-3 xl:grid-cols-4">
+              <RouteStat
+                label="Route orders"
+                value={truckOrders.length}
+                detail={`${routeOrderCounts.pending} pending`}
+              />
+              <RouteStat
+                label="Products"
+                value={loadingSummary.length}
+                detail={`${uncheckedLoadingCount} left`}
+              />
+              <RouteStat
+                label="Loaded"
+                value={`${checkedLoadingCount}/${loadingSummary.length}`}
+                detail={allLoadingChecked ? "Ready" : "Checking"}
+                tone={allLoadingChecked ? "success" : "default"}
+              />
+              <RouteStat label="Route total" value={fmtMoney(routeTotal)} detail="Unpaid invoice" />
+            </div>
+          )}
+
           {market === ALL_MARKETS ? (
             <div className="rounded-md border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-              Confirm customer orders first, then select one delivery market before loading the
-              truck.
+              Select one delivery market to review active customer orders for this time range.
             </div>
           ) : loadingSummary.length > 0 ? (
             <div className="overflow-hidden rounded-md border border-border">
-              <div className="hidden grid-cols-[44px_minmax(0,1fr)_140px_110px_140px] gap-3 border-b border-border bg-muted/40 px-4 py-3 text-xs font-semibold uppercase text-muted-foreground md:grid">
+              <div className="hidden grid-cols-[44px_minmax(0,1fr)_140px_130px_100px_130px] gap-3 border-b border-border bg-muted/40 px-4 py-3 text-xs font-semibold uppercase text-muted-foreground md:grid">
                 <span>Done</span>
                 <span>Product</span>
+                <span className="text-right">Stock</span>
                 <span className="text-right">Load Qty</span>
                 <span className="text-right">Orders</span>
-                <span className="text-right">Stock Use</span>
+                <span className="text-right">Value</span>
               </div>
               <div className="divide-y divide-border">
                 {loadingSummary.map((item, index) => {
@@ -447,7 +667,7 @@ function OrdersPage() {
                     <div
                       key={item.key}
                       className={cn(
-                        "grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-3 px-4 py-4 transition-colors md:grid-cols-[44px_minmax(0,1fr)_140px_110px_140px] md:items-center",
+                        "grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-3 px-4 py-4 transition-colors md:grid-cols-[44px_minmax(0,1fr)_140px_130px_100px_130px] md:items-center",
                         checked && "bg-success/5",
                       )}
                     >
@@ -479,6 +699,22 @@ function OrdersPage() {
                         </p>
                       </label>
 
+                      <div className="col-start-2 flex items-center justify-between gap-3 text-sm md:col-start-auto md:block md:text-right">
+                        <span className="text-xs font-semibold uppercase text-muted-foreground md:hidden">
+                          Stock
+                        </span>
+                        <div>
+                          <p className="font-semibold">
+                            {Number(item.stockAvailable.toFixed(2))} {item.stockUnit}
+                          </p>
+                          {item.stockUnit !== item.unit && (
+                            <p className="text-xs text-muted-foreground">
+                              uses {Number(item.stockQuantity.toFixed(2))} {item.stockUnit}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
                       <div className="col-start-2 flex items-center justify-between gap-3 md:col-start-auto md:block md:text-right">
                         <span className="text-xs font-semibold uppercase text-muted-foreground md:hidden">
                           Load Qty
@@ -493,13 +729,11 @@ function OrdersPage() {
                         <span>{item.orderIds.size} order(s)</span>
                       </div>
 
-                      <div className="col-start-2 flex items-center justify-between gap-3 text-sm text-muted-foreground md:col-start-auto md:block md:text-right">
-                        <span className="text-xs font-semibold uppercase md:hidden">Stock Use</span>
-                        <span>
-                          {item.stockUnit !== item.unit
-                            ? `${Number(item.stockQuantity.toFixed(2))} ${item.stockUnit}`
-                            : "-"}
+                      <div className="col-start-2 flex items-center justify-between gap-3 text-sm md:col-start-auto md:block md:text-right">
+                        <span className="text-xs font-semibold uppercase text-muted-foreground md:hidden">
+                          Value
                         </span>
+                        <span className="font-semibold">{fmtMoney(item.routeValue)}</span>
                       </div>
                     </div>
                   );
@@ -508,7 +742,89 @@ function OrdersPage() {
             </div>
           ) : (
             <div className="rounded-md border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-              No confirmed products to load for {market}.
+              No active products to load for {market} in this time range.
+            </div>
+          )}
+
+          {market !== ALL_MARKETS && truckOrders.length > 0 && (
+            <div className="mt-4 overflow-hidden rounded-md border border-border bg-background">
+              <div className="flex flex-col gap-1 border-b border-border bg-muted/30 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h3 className="font-semibold">Orders in this route</h3>
+                  <p className="text-xs text-muted-foreground">
+                    {truckOrders.length} order(s) from {market} in {weekWindowLabels[weekWindow]}.
+                  </p>
+                </div>
+                <p className="text-sm font-semibold">{fmtMoney(routeTotal)}</p>
+              </div>
+              <div className="divide-y divide-border">
+                {truckOrders.map((order) => {
+                  const buyer = state.buyerAccounts.find((item) => item.id === order.buyerId);
+                  const customer = state.customers.find((item) => item.id === order.customerId);
+
+                  return (
+                    <div
+                      key={order.id}
+                      className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_140px] md:items-start"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-semibold">{order.orderNumber}</span>
+                          <Badge className={cn("border-transparent", statusClasses[order.status])}>
+                            {statusLabels[order.status]}
+                          </Badge>
+                          <Badge
+                            className={cn(
+                              "border-transparent",
+                              paymentClasses[order.paymentStatus],
+                            )}
+                          >
+                            {paymentLabels[order.paymentStatus]}
+                          </Badge>
+                        </div>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          {buyer?.name ?? customer?.name ?? "Buyer"} -{" "}
+                          {customer?.market ?? buyer?.market ?? market}
+                        </p>
+                        <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                          {order.items.map((item, index) => {
+                            const product = state.products.find(
+                              (candidate) => candidate.id === item.productId,
+                            );
+
+                            return (
+                              <div
+                                key={`${order.id}-${item.productId}-${index}`}
+                                className="rounded-md border border-border bg-muted/30 px-3 py-2"
+                              >
+                                <p className="truncate text-sm font-semibold">
+                                  {product?.name ?? "Product"}
+                                </p>
+                                <div className="mt-1 flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                                  <span>
+                                    {item.quantity} {item.unit}
+                                  </span>
+                                  <span>
+                                    {item.estimatedUnitPrice === undefined
+                                      ? "Confirm"
+                                      : fmtMoney(item.estimatedUnitPrice * item.quantity)}
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      <div className="text-sm font-semibold md:text-right">
+                        <p>{fmtMoney(order.totalEstimate)}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {order.items.length} item(s)
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
         </PageSection>
@@ -519,7 +835,7 @@ function OrdersPage() {
           title="Order Control"
           description="Filter, confirm, pack, and complete orders."
         >
-          <div className="mb-4 grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_180px_180px_180px_auto]">
+          <div className="mb-4 grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_220px]">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -542,39 +858,6 @@ function OrdersPage() {
                 ))}
               </SelectContent>
             </Select>
-            <Select
-              value={status}
-              onValueChange={(value) => setStatus(value as typeof ALL_STATUS | BuyerOrderStatus)}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL_STATUS}>All status</SelectItem>
-                <SelectItem value="pending">Pending</SelectItem>
-                <SelectItem value="confirmed">Confirmed</SelectItem>
-                <SelectItem value="packing">Packing</SelectItem>
-                <SelectItem value="completed">Completed</SelectItem>
-                <SelectItem value="cancelled">Cancelled</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select
-              value={payment}
-              onValueChange={(value) => setPayment(value as typeof ALL_PAYMENT | PaymentStatus)}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL_PAYMENT}>All payment</SelectItem>
-                <SelectItem value="paid">Paid</SelectItem>
-                <SelectItem value="partial">Partial</SelectItem>
-                <SelectItem value="unpaid">Unpaid</SelectItem>
-              </SelectContent>
-            </Select>
-            <Button type="button" variant="outline" onClick={clearFilters}>
-              Clear
-            </Button>
           </div>
 
           <div className="space-y-3">
@@ -613,14 +896,79 @@ function OrderCard({
   onPaymentChange: (status: PaymentStatus, paidAmount?: number) => void;
   onStatusChange: (status: BuyerOrderStatus) => void;
 }) {
-  const { state } = useStore();
+  const { state, recordPayment } = useStore();
+  const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
+  const [paymentAmount, setPaymentAmount] = useState(0);
+  const [partialEditorOpen, setPartialEditorOpen] = useState(false);
+  const [partialAmount, setPartialAmount] = useState(0);
   const buyer = state.buyerAccounts.find((account) => account.id === order.buyerId);
   const customer = state.customers.find((item) => item.id === order.customerId);
+  const receipt = order.saleId ? state.sales.find((sale) => sale.id === order.saleId) : undefined;
+  const total = receipt?.total ?? order.totalEstimate;
+  const paidAmount = receipt?.paidAmount ?? order.paidAmount;
+  const paymentSelectValue = partialEditorOpen ? "partial" : order.paymentStatus;
   const canConfirm = order.status === "pending";
   const canPack = order.status === "confirmed";
   const canComplete = order.status === "packing";
   const canCancel = order.status !== "completed" && order.status !== "cancelled";
-  const remaining = Math.max(order.totalEstimate - order.paidAmount, 0);
+  const canRecordPayment = order.status === "completed" && Boolean(receipt) && total > paidAmount;
+  const remaining = Math.max(total - paidAmount, 0);
+
+  const openPaymentDialog = () => {
+    setPaymentAmount(Number(remaining.toFixed(2)));
+    setPaymentDialogOpen(true);
+  };
+
+  const savePayment = () => {
+    if (!receipt) {
+      toast.error("Receipt not found for this order.");
+      return;
+    }
+
+    const normalizedAmount = Number(Math.min(Math.max(paymentAmount, 0), remaining).toFixed(2));
+    if (normalizedAmount <= 0) {
+      toast.error("Enter the cash amount received.");
+      return;
+    }
+
+    recordPayment({
+      customerId: receipt.customerId,
+      saleId: receipt.id,
+      amount: normalizedAmount,
+      date: new Date().toISOString().slice(0, 10),
+      note: `Physical payment for ${receipt.receiptNumber}`,
+    });
+
+    toast.success(`Payment recorded for ${receipt.receiptNumber}.`);
+    setPaymentDialogOpen(false);
+    setPaymentAmount(0);
+  };
+
+  const updatePartialAmount = (value: number) => {
+    const normalizedAmount = Number(Math.min(Math.max(value, 0), total).toFixed(2));
+    setPartialAmount(normalizedAmount);
+    onPaymentChange("partial", normalizedAmount);
+
+    if (normalizedAmount >= total && total > 0) {
+      setPartialEditorOpen(false);
+    }
+  };
+
+  const handlePaymentSelect = (value: PaymentStatus) => {
+    if (value === "partial") {
+      const startingAmount = paidAmount > 0 && paidAmount < total ? paidAmount : 0;
+      setPartialAmount(startingAmount);
+      setPartialEditorOpen(true);
+      if (startingAmount > 0) {
+        onPaymentChange("partial", startingAmount);
+      }
+      return;
+    }
+
+    setPartialEditorOpen(false);
+    setPartialAmount(0);
+    onPaymentChange(value, value === "paid" ? total : 0);
+  };
 
   return (
     <article className="rounded-md border border-border bg-background p-3">
@@ -635,6 +983,11 @@ function OrderCard({
               {paymentLabels[order.paymentStatus]}
             </Badge>
           </div>
+          {receipt && (
+            <p className="mt-1 text-xs font-medium text-primary">
+              Receipt: {receipt.receiptNumber}
+            </p>
+          )}
           <p className="mt-1 text-sm text-muted-foreground">
             {buyer?.name ?? customer?.name ?? "Buyer"} -{" "}
             {customer?.market ?? buyer?.market ?? "Market"}
@@ -647,18 +1000,24 @@ function OrderCard({
           </p>
           <p className="mt-2 text-xs text-muted-foreground">
             {order.status === "pending"
-              ? "Waiting for seller confirmation. Not included in truck loading yet."
-              : loadableStatuses.has(order.status)
-                ? "Confirmed for loading route."
+              ? "Waiting for loading confirmation. It can be included in a market truck route."
+              : routeStatuses.has(order.status)
+                ? "Active for loading route."
                 : "Closed order."}
           </p>
         </div>
 
         <div className="flex flex-col gap-2 xl:items-end">
           <div className="flex flex-wrap gap-2">
+            {canRecordPayment && (
+              <Button type="button" size="sm" onClick={openPaymentDialog}>
+                <Wallet className="h-4 w-4" />
+                Record Payment
+              </Button>
+            )}
             <Select
-              value={order.paymentStatus}
-              onValueChange={(value) => onPaymentChange(value as PaymentStatus, order.paidAmount)}
+              value={paymentSelectValue}
+              onValueChange={(value) => handlePaymentSelect(value as PaymentStatus)}
             >
               <SelectTrigger className="h-9 w-32">
                 <WalletCards className="h-4 w-4" />
@@ -670,17 +1029,27 @@ function OrderCard({
                 <SelectItem value="paid">Paid</SelectItem>
               </SelectContent>
             </Select>
-            {order.paymentStatus === "partial" && (
-              <Input
-                type="number"
-                min={0}
-                max={order.totalEstimate}
-                step="0.01"
-                value={order.paidAmount}
-                onChange={(event) => onPaymentChange("partial", Number(event.target.value))}
-                className="h-9 w-28 text-right"
-                aria-label="Paid amount"
-              />
+            {(partialEditorOpen || order.paymentStatus === "partial") && (
+              <div className="flex h-9 items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-2">
+                <Label
+                  htmlFor={`partial-paid-${order.id}`}
+                  className="whitespace-nowrap text-xs font-semibold text-primary"
+                >
+                  Paid
+                </Label>
+                <Input
+                  id={`partial-paid-${order.id}`}
+                  type="number"
+                  min={0}
+                  max={total}
+                  step="0.01"
+                  value={displayZeroAsPlaceholder(partialEditorOpen ? partialAmount : paidAmount)}
+                  placeholder="0"
+                  onChange={(event) => updatePartialAmount(parseNumericInput(event.target.value))}
+                  className="h-7 w-24 border-0 bg-transparent p-0 text-right shadow-none focus-visible:ring-0"
+                  aria-label="Paid amount"
+                />
+              </div>
             )}
           </div>
           <div className="flex flex-wrap gap-2 xl:justify-end">
@@ -756,8 +1125,8 @@ function OrderCard({
           {order.notes ? <span>Note: {order.notes}</span> : <span>No note</span>}
         </div>
         <div className="flex flex-wrap justify-end gap-x-4 gap-y-1 font-semibold">
-          <span>Total: {order.totalEstimate > 0 ? fmtMoney(order.totalEstimate) : "Confirm"}</span>
-          <span>Paid: {fmtMoney(order.paidAmount)}</span>
+          <span>Total: {total > 0 ? fmtMoney(total) : "Confirm"}</span>
+          <span>Paid: {fmtMoney(paidAmount)}</span>
           <span className={remaining > 0 ? "text-destructive" : "text-success"}>
             Remaining: {fmtMoney(remaining)}
           </span>
@@ -766,6 +1135,102 @@ function OrderCard({
       {order.sellerNote && (
         <p className="mt-2 text-xs text-muted-foreground">Seller note: {order.sellerNote}</p>
       )}
+      <Dialog
+        open={paymentDialogOpen}
+        onOpenChange={(open) => {
+          setPaymentDialogOpen(open);
+          if (open) setPaymentAmount(Number(remaining.toFixed(2)));
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Record Payment</DialogTitle>
+            <DialogDescription>
+              Enter the cash received after delivery. The linked receipt and customer invoice will
+              update together.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="rounded-md border border-border bg-muted/40 p-3 text-sm">
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-muted-foreground">Receipt</span>
+              <span className="font-semibold">{receipt?.receiptNumber ?? order.orderNumber}</span>
+            </div>
+            <div className="mt-2 flex items-center justify-between gap-4">
+              <span className="text-muted-foreground">Total</span>
+              <span className="font-semibold">{fmtMoney(total)}</span>
+            </div>
+            <div className="mt-2 flex items-center justify-between gap-4">
+              <span className="text-muted-foreground">Already paid</span>
+              <span className="font-semibold">{fmtMoney(paidAmount)}</span>
+            </div>
+            <div className="mt-2 flex items-center justify-between gap-4">
+              <span className="text-muted-foreground">Remaining</span>
+              <span className="font-semibold text-destructive">{fmtMoney(remaining)}</span>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor={`payment-${order.id}`}>Cash received</Label>
+            <div className="flex gap-2">
+              <Input
+                id={`payment-${order.id}`}
+                type="number"
+                min={0}
+                max={remaining}
+                step="0.01"
+                value={displayZeroAsPlaceholder(paymentAmount)}
+                placeholder="0"
+                onChange={(event) => setPaymentAmount(parseNumericInput(event.target.value))}
+              />
+              <Button type="button" variant="outline" onClick={() => setPaymentAmount(remaining)}>
+                Full
+              </Button>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setPaymentDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={savePayment}>
+              Save Payment
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </article>
+  );
+}
+
+function RouteStat({
+  label,
+  value,
+  detail,
+  tone = "default",
+}: {
+  label: string;
+  value: number | string;
+  detail: string;
+  tone?: "default" | "success";
+}) {
+  return (
+    <div
+      className={cn(
+        "rounded-md border border-border bg-background p-3",
+        tone === "success" && "border-success/30 bg-success/5",
+      )}
+    >
+      <p className="text-xs font-semibold uppercase text-muted-foreground">{label}</p>
+      <p className="mt-1 truncate text-xl font-bold">{value}</p>
+      <p
+        className={cn(
+          "mt-1 text-xs text-muted-foreground",
+          tone === "success" && "font-medium text-success",
+        )}
+      >
+        {detail}
+      </p>
+    </div>
   );
 }

@@ -1991,12 +1991,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const updateBuyerOrderPayment: StoreContextValue["updateBuyerOrderPayment"] = useCallback(
     (orderId, paymentStatus, paidAmount) => {
-      setState((s) => ({
-        ...s,
-        buyerOrders: s.buyerOrders.map((order) => {
+      setState((s) => {
+        let linkedSaleId: string | undefined;
+        let linkedPaidAmount: number | undefined;
+        let linkedPaymentStatus: PaymentStatus | undefined;
+
+        const buyerOrders = s.buyerOrders.map((order) => {
           if (order.id !== orderId) return order;
 
-          const total = Number(Math.max(order.totalEstimate, 0).toFixed(2));
+          const linkedSale = order.saleId
+            ? s.sales.find((sale) => sale.id === order.saleId)
+            : undefined;
+          const total = Number(Math.max(linkedSale?.total ?? order.totalEstimate, 0).toFixed(2));
           const nextPaid =
             paymentStatus === "paid"
               ? total
@@ -2005,15 +2011,36 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 : Math.min(Math.max(paidAmount ?? order.paidAmount ?? 0, 0), total);
           const nextPaymentStatus =
             nextPaid <= 0 ? "unpaid" : nextPaid >= total ? "paid" : paymentStatus;
+          const normalizedPaidAmount = Number(nextPaid.toFixed(2));
+
+          linkedSaleId = order.saleId;
+          linkedPaidAmount = normalizedPaidAmount;
+          linkedPaymentStatus = nextPaymentStatus;
 
           return {
             ...order,
+            totalEstimate: total,
             paymentStatus: nextPaymentStatus,
-            paidAmount: Number(nextPaid.toFixed(2)),
+            paidAmount: normalizedPaidAmount,
             updatedAt: todayIsoString(),
           };
-        }),
-      }));
+        });
+
+        const sales =
+          linkedSaleId && linkedPaymentStatus && linkedPaidAmount !== undefined
+            ? s.sales.map((sale) =>
+                sale.id === linkedSaleId
+                  ? {
+                      ...sale,
+                      paymentStatus: linkedPaymentStatus,
+                      paidAmount: linkedPaidAmount,
+                    }
+                  : sale,
+              )
+            : s.sales;
+
+        return { ...s, buyerOrders, sales };
+      });
     },
     [],
   );
@@ -2332,6 +2359,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         sales: recalculated.sales,
         products: recalculated.products,
         customerPrices,
+        buyerOrders: s.buyerOrders.map((order) =>
+          order.saleId === saleId
+            ? {
+                ...order,
+                paymentStatus: updatedSale.paymentStatus,
+                paidAmount: updatedSale.paidAmount,
+                totalEstimate: updatedSale.total,
+                updatedAt: todayIsoString(),
+              }
+            : order,
+        ),
       };
     });
 
@@ -2375,7 +2413,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           return { ...sale, paidAmount: Math.min(newPaid, sale.total), paymentStatus: status };
         });
       }
-      return { ...s, payments, sales };
+
+      const saleById = new Map(sales.map((sale) => [sale.id, sale]));
+      const buyerOrders = p.saleId
+        ? s.buyerOrders.map((order) => {
+            const sale = order.saleId ? saleById.get(order.saleId) : undefined;
+            if (!sale) return order;
+
+            return {
+              ...order,
+              paymentStatus: sale.paymentStatus,
+              paidAmount: sale.paidAmount,
+              totalEstimate: sale.total,
+              updatedAt: todayIsoString(),
+            };
+          })
+        : s.buyerOrders;
+
+      return { ...s, payments, sales, buyerOrders };
     });
   }, []);
 
