@@ -5,8 +5,20 @@ import { PageHeader, PageSection, StatusBadge } from "@/components/app/StatCard"
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { displayZeroAsPlaceholder, parseNumericInput } from "@/lib/utils";
 import { toast } from "sonner";
 import type { Sale } from "@/lib/types";
@@ -25,11 +37,17 @@ function DebtsPage() {
     [state.customers],
   );
   const markets = useMemo(
-    () => Array.from(new Set(state.customers.map((customer) => customer.market))).sort(),
+    () =>
+      Array.from(
+        new Set(state.customers.map((customer) => customer.market.trim()).filter(Boolean)),
+      ).sort(),
     [state.customers],
   );
   const customerOptions = useMemo(
-    () => state.customers.filter((customer) => marketFilter === "all" || customer.market === marketFilter),
+    () =>
+      state.customers.filter(
+        (customer) => marketFilter === "all" || customer.market === marketFilter,
+      ),
     [state.customers, marketFilter],
   );
 
@@ -96,12 +114,14 @@ function DebtsPage() {
       <PageSection title="Customers with Debt">
         <div className="overflow-x-auto -mx-5">
           <table className="w-full text-sm min-w-[600px]">
-            <thead><tr className="text-left text-xs uppercase text-muted-foreground border-b border-border">
-              <th className="px-5 py-2 font-medium">Customer</th>
-              <th className="px-5 py-2 font-medium">Market</th>
-              <th className="px-5 py-2 font-medium text-right">Total Sales</th>
-              <th className="px-5 py-2 font-medium text-right">Total Debt</th>
-            </tr></thead>
+            <thead>
+              <tr className="text-left text-xs uppercase text-muted-foreground border-b border-border">
+                <th className="px-5 py-2 font-medium">Customer</th>
+                <th className="px-5 py-2 font-medium">Market</th>
+                <th className="px-5 py-2 font-medium text-right">Total Sales</th>
+                <th className="px-5 py-2 font-medium text-right">Total Debt</th>
+              </tr>
+            </thead>
             <tbody>
               {customersWithDebt.map((c) => {
                 const t = customerTotals(state, c.id);
@@ -110,7 +130,9 @@ function DebtsPage() {
                     <td className="px-5 py-2 font-medium">{c.name}</td>
                     <td className="px-5 py-2 text-muted-foreground">{c.market}</td>
                     <td className="px-5 py-2 text-right">{fmtMoney(t.totalSales)}</td>
-                    <td className="px-5 py-2 text-right font-bold text-destructive">{fmtMoney(t.debt)}</td>
+                    <td className="px-5 py-2 text-right font-bold text-destructive">
+                      {fmtMoney(t.debt)}
+                    </td>
                   </tr>
                 );
               })}
@@ -130,16 +152,18 @@ function DebtsPage() {
         <PageSection title="Unpaid / Partial Sales">
           <div className="overflow-x-auto -mx-5">
             <table className="w-full text-sm min-w-[700px]">
-              <thead><tr className="text-left text-xs uppercase text-muted-foreground border-b border-border">
-                <th className="px-5 py-2 font-medium">Receipt</th>
-                <th className="px-5 py-2 font-medium">Customer</th>
-                <th className="px-5 py-2 font-medium">Date</th>
-                <th className="px-5 py-2 font-medium text-right">Total</th>
-                <th className="px-5 py-2 font-medium text-right">Paid</th>
-                <th className="px-5 py-2 font-medium text-right">Remaining</th>
-                <th className="px-5 py-2 font-medium">Status</th>
-                <th className="px-5 py-2 font-medium text-right">Action</th>
-              </tr></thead>
+              <thead>
+                <tr className="text-left text-xs uppercase text-muted-foreground border-b border-border">
+                  <th className="px-5 py-2 font-medium">Receipt</th>
+                  <th className="px-5 py-2 font-medium">Customer</th>
+                  <th className="px-5 py-2 font-medium">Date</th>
+                  <th className="px-5 py-2 font-medium text-right">Total</th>
+                  <th className="px-5 py-2 font-medium text-right">Paid</th>
+                  <th className="px-5 py-2 font-medium text-right">Remaining</th>
+                  <th className="px-5 py-2 font-medium">Status</th>
+                  <th className="px-5 py-2 font-medium text-right">Action</th>
+                </tr>
+              </thead>
               <tbody>
                 {filteredUnpaid.map((s) => (
                   <tr key={s.id} className="border-b border-border/60 last:border-0">
@@ -148,12 +172,32 @@ function DebtsPage() {
                     <td className="px-5 py-2">{s.date}</td>
                     <td className="px-5 py-2 text-right">{fmtMoney(s.total)}</td>
                     <td className="px-5 py-2 text-right">{fmtMoney(s.paidAmount)}</td>
-                    <td className="px-5 py-2 text-right font-bold text-destructive">{fmtMoney(s.total - s.paidAmount)}</td>
-                    <td className="px-5 py-2"><StatusBadge status={s.paymentStatus} /></td>
-                    <td className="px-5 py-2 text-right"><Button size="sm" onClick={() => { setPaying(s); setAmount(s.total - s.paidAmount); }}>Record Payment</Button></td>
+                    <td className="px-5 py-2 text-right font-bold text-destructive">
+                      {fmtMoney(s.total - s.paidAmount)}
+                    </td>
+                    <td className="px-5 py-2">
+                      <StatusBadge status={s.paymentStatus} />
+                    </td>
+                    <td className="px-5 py-2 text-right">
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          setPaying(s);
+                          setAmount(s.total - s.paidAmount);
+                        }}
+                      >
+                        Record Payment
+                      </Button>
+                    </td>
                   </tr>
                 ))}
-                {filteredUnpaid.length === 0 && <tr><td colSpan={8} className="px-5 py-8 text-center text-muted-foreground">No outstanding debts. 🎉</td></tr>}
+                {filteredUnpaid.length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="px-5 py-8 text-center text-muted-foreground">
+                      No outstanding debts. 🎉
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -162,22 +206,54 @@ function DebtsPage() {
 
       <Dialog open={!!paying} onOpenChange={(o) => !o && setPaying(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Record Payment — {paying?.receiptNumber}</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Record Payment — {paying?.receiptNumber}</DialogTitle>
+          </DialogHeader>
           {paying && (
             <div className="space-y-3">
-              <p className="text-sm">Remaining: <span className="font-bold text-destructive">{fmtMoney(paying.total - paying.paidAmount)}</span></p>
-              <div><Label>Amount</Label><Input type="number" step="0.01" min={0} max={paying.total - paying.paidAmount} value={displayZeroAsPlaceholder(amount)} placeholder="0" onChange={(e) => setAmount(parseNumericInput(e.target.value))} /></div>
+              <p className="text-sm">
+                Remaining:{" "}
+                <span className="font-bold text-destructive">
+                  {fmtMoney(paying.total - paying.paidAmount)}
+                </span>
+              </p>
+              <div>
+                <Label>Amount</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  max={paying.total - paying.paidAmount}
+                  value={displayZeroAsPlaceholder(amount)}
+                  placeholder="0"
+                  onChange={(e) => setAmount(parseNumericInput(e.target.value))}
+                />
+              </div>
             </div>
           )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setPaying(null)}>Cancel</Button>
-            <Button onClick={() => {
-              if (!paying) return;
-              if (amount <= 0) { toast.error("Enter an amount"); return; }
-              recordPayment({ customerId: paying.customerId, saleId: paying.id, amount, date: new Date().toISOString().slice(0, 10) });
-              toast.success("Payment recorded");
-              setPaying(null);
-            }}>Save</Button>
+            <Button variant="outline" onClick={() => setPaying(null)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (!paying) return;
+                if (amount <= 0) {
+                  toast.error("Enter an amount");
+                  return;
+                }
+                recordPayment({
+                  customerId: paying.customerId,
+                  saleId: paying.id,
+                  amount,
+                  date: new Date().toISOString().slice(0, 10),
+                });
+                toast.success("Payment recorded");
+                setPaying(null);
+              }}
+            >
+              Save
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

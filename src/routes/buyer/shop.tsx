@@ -91,6 +91,16 @@ function BuyerShopPage() {
     [cart, state.products],
   );
 
+  const selectedCategoryCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+
+    for (const item of cartItems) {
+      counts.set(item.product.category, (counts.get(item.product.category) ?? 0) + 1);
+    }
+
+    return counts;
+  }, [cartItems]);
+
   const cartTotal = cartItems.reduce((sum, item) => {
     if (!currentBuyer) return sum;
     const price = buyerVisiblePrice(state, currentBuyer.customerId, item.productId, item.unit);
@@ -233,40 +243,65 @@ function BuyerShopPage() {
             onClick={() => setCategory(ALL_CATEGORY)}
           >
             All
+            {cartItems.length > 0 && (
+              <span className="ml-1 rounded-full bg-primary px-1.5 text-[10px] text-primary-foreground">
+                {cartItems.length}
+              </span>
+            )}
           </Button>
-          {categories.map((item) => (
-            <Button
-              key={item}
-              type="button"
-              size="sm"
-              variant={category === item ? "default" : "outline"}
-              className="rounded-full"
-              onClick={() => setCategory(item)}
-            >
-              {item}
-            </Button>
-          ))}
+          {categories.map((item) => {
+            const selectedCount = selectedCategoryCounts.get(item) ?? 0;
+            return (
+              <Button
+                key={item}
+                type="button"
+                size="sm"
+                variant={selectedCount > 0 ? "outline" : category === item ? "default" : "outline"}
+                className={cn(
+                  "rounded-full",
+                  selectedCount > 0 &&
+                    "border-success bg-success/15 text-success hover:bg-success/20 hover:text-success",
+                )}
+                onClick={() => setCategory(item)}
+              >
+                {item}
+                {selectedCount > 0 && (
+                  <span
+                    className={cn(
+                      "ml-1 rounded-full px-1.5 text-[10px]",
+                      "bg-success text-success-foreground",
+                    )}
+                  >
+                    {selectedCount}
+                  </span>
+                )}
+              </Button>
+            );
+          })}
         </div>
 
-        {cartItems.length > 0 && (
-          <div className="rounded-md border border-border bg-card p-3 shadow-[var(--shadow-card)]">
-            <div className="flex flex-col gap-3 min-[420px]:flex-row min-[420px]:items-center min-[420px]:justify-between">
-              <div className="min-w-0 text-sm">
-                <p className="font-semibold">{cartItems.length} products selected</p>
-                <p className="truncate text-muted-foreground">
-                  {cartTotal > 0 ? fmtMoney(cartTotal) : "Seller will confirm price"}
-                </p>
-              </div>
-              <Button
-                className="h-11 w-full text-base min-[420px]:w-auto min-[420px]:px-5"
-                onClick={() => setReviewOpen(true)}
-              >
-                <ShoppingCart className="h-5 w-5" />
-                Review Order
-              </Button>
+        <div className="rounded-md border border-border bg-card p-3 shadow-[var(--shadow-card)]">
+          <div className="flex flex-col gap-3 min-[420px]:flex-row min-[420px]:items-center min-[420px]:justify-between">
+            <div className="min-w-0 text-sm">
+              <p className="font-semibold">{cartItems.length} products selected</p>
+              <p className="truncate text-muted-foreground">
+                {cartItems.length === 0
+                  ? fmtMoney(0)
+                  : cartTotal > 0
+                    ? fmtMoney(cartTotal)
+                    : "Seller will confirm price"}
+              </p>
             </div>
+            <Button
+              className="h-11 w-full text-base min-[420px]:w-auto min-[420px]:px-5"
+              onClick={() => setReviewOpen(true)}
+              disabled={cartItems.length === 0}
+            >
+              <ShoppingCart className="h-5 w-5" />
+              Review Order
+            </Button>
           </div>
-        )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -284,7 +319,10 @@ function BuyerShopPage() {
           return (
             <article
               key={product.id}
-              className="flex min-w-0 flex-col rounded-md border border-border bg-card p-2.5 shadow-[var(--shadow-card)]"
+              className={cn(
+                "flex min-w-0 flex-col rounded-md border bg-card p-2.5 shadow-[var(--shadow-card)] transition-colors",
+                quantity > 0 ? "border-primary bg-primary/5" : "border-border",
+              )}
             >
               <div className="flex flex-1 gap-2.5">
                 <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-sidebar-primary/10 text-sidebar-primary">
@@ -296,7 +334,14 @@ function BuyerShopPage() {
                       <h2 className="line-clamp-2 text-sm font-semibold leading-tight">
                         {product.name}
                       </h2>
-                      <p className="truncate text-xs text-muted-foreground">{product.category}</p>
+                      <p
+                        className={cn(
+                          "truncate text-xs text-muted-foreground",
+                          quantity > 0 && "font-medium text-primary",
+                        )}
+                      >
+                        {product.category}
+                      </p>
                     </div>
                     <div className="shrink-0 text-right">
                       <p className="text-base font-bold">
@@ -400,6 +445,12 @@ function BuyerShopPage() {
               const price = currentBuyer
                 ? buyerVisiblePrice(state, currentBuyer.customerId, item.productId, item.unit)
                 : undefined;
+              const maxQuantity = getMaxSaleQuantityFromStock(
+                item.product,
+                item.product.stock,
+                item.unit,
+              );
+
               return (
                 <div key={item.productId} className="rounded-md border border-border p-3">
                   <div className="flex items-start justify-between gap-3">
@@ -412,6 +463,39 @@ function BuyerShopPage() {
                     <p className="shrink-0 text-sm font-semibold">
                       {price === undefined ? "Confirm" : fmtMoney(price.price * item.quantity)}
                     </p>
+                  </div>
+                  <div className="mt-3 flex items-center justify-between gap-3">
+                    <p className="text-xs text-muted-foreground">
+                      Max {maxQuantity} {item.unit}
+                    </p>
+                    <div className="flex items-center rounded-md border border-border">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9"
+                        onClick={() =>
+                          item.unit && setCartQuantity(item.product, item.unit, item.quantity - 1)
+                        }
+                        aria-label="Decrease quantity"
+                      >
+                        <Minus className="h-4 w-4" />
+                      </Button>
+                      <div className="w-10 text-center text-sm font-semibold">{item.quantity}</div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9"
+                        onClick={() =>
+                          item.unit && setCartQuantity(item.product, item.unit, item.quantity + 1)
+                        }
+                        disabled={item.quantity >= maxQuantity}
+                        aria-label="Increase quantity"
+                      >
+                        <Plus className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
                 </div>
               );

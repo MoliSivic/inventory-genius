@@ -78,7 +78,10 @@ function SalesPage() {
   const [editingSaleId, setEditingSaleId] = useState<string | null>(null);
 
   const markets = useMemo(
-    () => Array.from(new Set(state.customers.map((c) => c.market))),
+    () =>
+      Array.from(new Set(state.customers.map((c) => c.market.trim()).filter(Boolean))).sort(
+        (a, b) => a.localeCompare(b),
+      ),
     [state.customers],
   );
   const filteredCustomers = state.customers.filter(
