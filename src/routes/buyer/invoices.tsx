@@ -31,8 +31,15 @@ function BuyerInvoicesPage() {
     "buyer_invoice_archive_filter",
     "active",
   );
+  const buyerOrderBySaleId = new Map(
+    state.buyerOrders.filter((order) => order.saleId).map((order) => [order.saleId, order]),
+  );
   const allCustomerInvoices = state.sales
-    .filter((sale) => sale.customerId === currentBuyer?.customerId)
+    .filter((sale) => {
+      if (sale.customerId !== currentBuyer?.customerId) return false;
+      const linkedOrder = buyerOrderBySaleId.get(sale.id);
+      return !linkedOrder || linkedOrder.buyerId === currentBuyer?.id;
+    })
     .sort((left, right) => right.date.localeCompare(left.date));
   const invoices = allCustomerInvoices.filter((sale) => {
     const isArchived = Boolean(sale.archivedAt);
@@ -47,7 +54,8 @@ function BuyerInvoicesPage() {
       <div className="mb-3 sm:mb-6">
         <h1 className="text-xl font-bold tracking-tight sm:text-2xl">Invoices</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          {invoices.length} receipts from {state.shopName}
+          {invoices.length} official receipt{invoices.length === 1 ? "" : "s"} from {state.shopName}
+          . Payments update after delivery.
         </p>
       </div>
 

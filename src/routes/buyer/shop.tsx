@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import {
+  ArrowUpDown,
   Boxes,
   Minus,
   PackageCheck,
@@ -50,10 +51,12 @@ type CartItem = {
 };
 
 const ALL_CATEGORY = "all";
+type SortMode = "default" | "price_asc" | "price_desc" | "stock_desc";
+
 const priceSourceLabels = {
-  customer: "Your price",
+  customer: "Customer price",
   market: "Market price",
-  estimate: "Estimate",
+  estimate: "Seller estimate",
 } as const;
 
 function BuyerShopPage() {
@@ -61,23 +64,59 @@ function BuyerShopPage() {
   const navigate = Route.useNavigate();
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState(ALL_CATEGORY);
+  const [sortMode, setSortMode] = useState<SortMode>("default");
   const [cart, setCart] = useState<Record<string, CartItem>>({});
   const [notes, setNotes] = useState("");
   const [reviewOpen, setReviewOpen] = useState(false);
 
   const categories = useMemo(
-    () => Array.from(new Set(state.products.map((product) => product.category))).filter(Boolean),
+    () =>
+      Array.from(new Set(state.products.map((product) => product.category)))
+        .filter(Boolean)
+        .sort((left, right) => left.localeCompare(right)),
     [state.products],
   );
 
   const visibleProducts = useMemo(() => {
     const query = search.trim().toLocaleLowerCase();
+
+    const productPrice = (product: Product) => {
+      if (!currentBuyer) return undefined;
+      const defaultUnit = getProductSaleUnitOptions(product)[0]?.unit;
+      if (!defaultUnit) return undefined;
+      return buyerVisiblePrice(state, currentBuyer.customerId, product.id, defaultUnit)?.price;
+    };
+
     return state.products
       .filter((product) => product.stock > 0)
       .filter((product) => category === ALL_CATEGORY || product.category === category)
-      .filter((product) => !query || product.name.toLocaleLowerCase().includes(query))
-      .sort((left, right) => left.name.localeCompare(right.name));
-  }, [category, search, state.products]);
+      .filter(
+        (product) =>
+          !query ||
+          product.name.toLocaleLowerCase().includes(query) ||
+          product.category.toLocaleLowerCase().includes(query),
+      )
+      .sort((left, right) => {
+        if (sortMode === "price_asc" || sortMode === "price_desc") {
+          const leftPrice = productPrice(left);
+          const rightPrice = productPrice(right);
+
+          if (leftPrice === undefined && rightPrice === undefined) {
+            return left.name.localeCompare(right.name);
+          }
+          if (leftPrice === undefined) return 1;
+          if (rightPrice === undefined) return -1;
+
+          return sortMode === "price_asc" ? leftPrice - rightPrice : rightPrice - leftPrice;
+        }
+
+        if (sortMode === "stock_desc") {
+          return right.stock - left.stock || left.name.localeCompare(right.name);
+        }
+
+        return left.name.localeCompare(right.name);
+      });
+  }, [category, currentBuyer, search, sortMode, state]);
 
   const cartItems = useMemo(
     () =>
@@ -106,6 +145,7 @@ function BuyerShopPage() {
     const price = buyerVisiblePrice(state, currentBuyer.customerId, item.productId, item.unit);
     return price === undefined ? sum : sum + price.price * item.quantity;
   }, 0);
+  const totalQuantity = cartItems.reduce((sum, item) => sum + item.quantity, 0);
 
   const pricedItemCount = cartItems.filter(
     (item) =>
@@ -206,10 +246,16 @@ function BuyerShopPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-7xl px-3 py-3 sm:px-6 sm:py-4 lg:px-8">
-      <div className="mb-3 sm:mb-6">
-        <h1 className="text-xl font-bold tracking-tight sm:text-2xl">Products</h1>
-        <p className="mt-1 text-sm text-muted-foreground">{currentBuyer?.market}</p>
+    <div className="mx-auto w-full max-w-7xl px-3 pb-28 pt-3 sm:px-6 sm:pb-6 sm:pt-4 lg:px-8">
+      <div className="mb-3 flex flex-col gap-1 sm:mb-4">
+        <p className="text-xs font-semibold uppercase tracking-wide text-primary">
+          {currentBuyer?.name ?? "Customer"}
+        </p>
+        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Products</h1>
+        <p className="text-sm leading-6 text-muted-foreground sm:text-base">
+          {currentBuyer?.market || "Set market"} · Select products and review your order before
+          checkout.
+        </p>
       </div>
 
       <div className="mb-3 grid grid-cols-3 gap-2 sm:hidden">
@@ -223,28 +269,54 @@ function BuyerShopPage() {
         />
       </div>
 
-      <div className="sticky top-14 z-10 -mx-3 mb-3 space-y-3 border-b border-border bg-background px-3 pb-3 pt-1 sm:-mx-6 sm:top-16 sm:px-6 lg:-mx-8 lg:px-8">
-        <div className="relative max-w-2xl">
-          <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search product"
-            className="h-12 rounded-md pl-10 text-base"
-          />
+      <div className="sticky top-14 z-10 -mx-3 mb-4 space-y-3 border-y border-border/80 bg-background/95 px-3 py-3 shadow-sm backdrop-blur sm:-mx-6 sm:top-16 sm:px-6 lg:-mx-8 lg:px-8">
+        <div className="grid grid-cols-1 gap-2 lg:grid-cols-[minmax(0,1fr)_220px]">
+          <div className="relative">
+            <Search className="absolute left-3.5 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search products by name or category"
+              className="h-12 rounded-md border-border bg-card pl-11 pr-4 text-base shadow-[var(--shadow-card)]"
+            />
+          </div>
+
+          <Select value={sortMode} onValueChange={(value) => setSortMode(value as SortMode)}>
+            <SelectTrigger className="h-12 rounded-md border-border bg-card shadow-[var(--shadow-card)]">
+              <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
+              <SelectValue placeholder="Sort by" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="default">Default</SelectItem>
+              <SelectItem value="price_asc">Price Low to High</SelectItem>
+              <SelectItem value="price_desc">Price High to Low</SelectItem>
+              <SelectItem value="stock_desc">Stock Available</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
         <div className="flex gap-2 overflow-x-auto pb-1">
           <Button
             type="button"
             size="sm"
-            variant={category === ALL_CATEGORY ? "default" : "outline"}
-            className="rounded-full"
+            variant="outline"
+            className={cn(
+              "h-9 rounded-full border-border bg-card px-4 shadow-sm hover:bg-muted",
+              category === ALL_CATEGORY &&
+                "border-primary bg-primary text-primary-foreground hover:bg-primary/90",
+            )}
             onClick={() => setCategory(ALL_CATEGORY)}
           >
             All
             {cartItems.length > 0 && (
-              <span className="ml-1 rounded-full bg-primary px-1.5 text-[10px] text-primary-foreground">
+              <span
+                className={cn(
+                  "ml-1 rounded-full px-1.5 text-[10px]",
+                  category === ALL_CATEGORY
+                    ? "bg-primary-foreground/20 text-primary-foreground"
+                    : "bg-primary/15 text-primary",
+                )}
+              >
                 {cartItems.length}
               </span>
             )}
@@ -256,11 +328,14 @@ function BuyerShopPage() {
                 key={item}
                 type="button"
                 size="sm"
-                variant={selectedCount > 0 ? "outline" : category === item ? "default" : "outline"}
+                variant="outline"
                 className={cn(
-                  "rounded-full",
+                  "h-9 rounded-full border-border bg-card px-4 shadow-sm hover:bg-muted",
+                  category === item &&
+                    "border-primary bg-primary text-primary-foreground hover:bg-primary/90",
                   selectedCount > 0 &&
-                    "border-success bg-success/15 text-success hover:bg-success/20 hover:text-success",
+                    category !== item &&
+                    "border-success/40 bg-success/10 text-success hover:bg-success/15 hover:text-success",
                 )}
                 onClick={() => setCategory(item)}
               >
@@ -269,7 +344,9 @@ function BuyerShopPage() {
                   <span
                     className={cn(
                       "ml-1 rounded-full px-1.5 text-[10px]",
-                      "bg-success text-success-foreground",
+                      category === item
+                        ? "bg-primary-foreground/20 text-primary-foreground"
+                        : "bg-success text-success-foreground",
                     )}
                   >
                     {selectedCount}
@@ -280,20 +357,28 @@ function BuyerShopPage() {
           })}
         </div>
 
-        <div className="rounded-md border border-border bg-card p-3 shadow-[var(--shadow-card)]">
-          <div className="flex flex-col gap-3 min-[420px]:flex-row min-[420px]:items-center min-[420px]:justify-between">
-            <div className="min-w-0 text-sm">
-              <p className="font-semibold">{cartItems.length} products selected</p>
-              <p className="truncate text-muted-foreground">
+        <div className="rounded-md border border-border bg-card p-3 shadow-[var(--shadow-card)] sm:p-3.5">
+          <div className="flex flex-col gap-3 min-[460px]:flex-row min-[460px]:items-center min-[460px]:justify-between">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold sm:text-base">
                 {cartItems.length === 0
-                  ? fmtMoney(0)
-                  : cartTotal > 0
-                    ? fmtMoney(cartTotal)
-                    : "Seller will confirm price"}
+                  ? "No products selected yet"
+                  : `${cartItems.length} products selected · ${totalQuantity} items`}
+              </p>
+              <p className="mt-0.5 truncate text-sm text-muted-foreground">
+                Total:{" "}
+                <span className={cn("font-bold", cartItems.length > 0 && "text-foreground")}>
+                  {cartItems.length === 0
+                    ? fmtMoney(0)
+                    : cartTotal > 0
+                      ? fmtMoney(cartTotal)
+                      : "Seller will confirm price"}
+                </span>
               </p>
             </div>
             <Button
-              className="h-11 w-full text-base min-[420px]:w-auto min-[420px]:px-5"
+              className="h-11 w-full text-base font-semibold min-[460px]:w-auto min-[460px]:px-5"
+              variant={cartItems.length === 0 ? "secondary" : "default"}
               onClick={() => setReviewOpen(true)}
               disabled={cartItems.length === 0}
             >
@@ -304,7 +389,7 @@ function BuyerShopPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
         {visibleProducts.map((product) => {
           const unitOptions = getProductSaleUnitOptions(product);
           const selectedUnit = cart[product.id]?.unit ?? unitOptions[0]?.unit;
@@ -320,23 +405,25 @@ function BuyerShopPage() {
             <article
               key={product.id}
               className={cn(
-                "flex min-w-0 flex-col rounded-md border bg-card p-2.5 shadow-[var(--shadow-card)] transition-colors",
-                quantity > 0 ? "border-primary bg-primary/5" : "border-border",
+                "flex min-w-0 flex-col rounded-md border bg-card p-3.5 shadow-[var(--shadow-card)] transition-colors hover:border-primary/40 hover:shadow-md sm:p-4",
+                quantity > 0
+                  ? "border-primary bg-primary/5 ring-1 ring-primary/15"
+                  : "border-border",
               )}
             >
-              <div className="flex flex-1 gap-2.5">
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-sidebar-primary/10 text-sidebar-primary">
-                  <Boxes className="h-5 w-5" />
+              <div className="flex flex-1 gap-3">
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+                  <Boxes className="h-7 w-7" />
                 </div>
-                <div className="min-w-0 flex-1 space-y-1.5">
+                <div className="min-w-0 flex-1 space-y-2">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <h2 className="line-clamp-2 text-sm font-semibold leading-tight">
+                      <h2 className="line-clamp-2 text-base font-bold leading-7 text-foreground">
                         {product.name}
                       </h2>
                       <p
                         className={cn(
-                          "truncate text-xs text-muted-foreground",
+                          "truncate text-sm leading-5 text-muted-foreground",
                           quantity > 0 && "font-medium text-primary",
                         )}
                       >
@@ -344,31 +431,27 @@ function BuyerShopPage() {
                       </p>
                     </div>
                     <div className="shrink-0 text-right">
-                      <p className="text-base font-bold">
-                        {lineTotal !== undefined && quantity > 0
-                          ? fmtMoney(lineTotal)
-                          : price === undefined
-                            ? "Confirm"
-                            : fmtMoney(price.price)}
+                      <p className="text-xl font-bold leading-7">
+                        {price === undefined ? "Confirm" : fmtMoney(price.price)}
                       </p>
-                      {price && quantity > 0 && (
-                        <p className="mt-0.5 text-[11px] font-medium text-muted-foreground">
-                          {quantity} x {fmtMoney(price.price)}
+                      {lineTotal !== undefined && quantity > 0 && (
+                        <p className="mt-0.5 text-xs font-semibold text-primary">
+                          {fmtMoney(lineTotal)} total
                         </p>
                       )}
                     </div>
                   </div>
-                  <div className="flex flex-wrap items-center gap-1.5 text-xs">
-                    <span className="rounded-full bg-success/15 px-2 py-0.5 font-medium text-success">
-                      {maxQuantity} {selectedUnit}
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <span className="rounded-full bg-success/15 px-2.5 py-1 font-semibold text-success">
+                      Stock: {maxQuantity} {selectedUnit ? formatUnits(selectedUnit) : ""}
                     </span>
                     {price && (
-                      <span className="rounded-full bg-muted px-2 py-0.5 font-medium text-muted-foreground">
+                      <span className="rounded-full bg-primary/10 px-2.5 py-1 font-semibold text-primary">
                         {priceSourceLabels[price.source]}
                       </span>
                     )}
                     {price === undefined && (
-                      <span className="rounded-full bg-warning/20 px-2 py-0.5 font-medium text-warning-foreground">
+                      <span className="rounded-full bg-warning/20 px-2.5 py-1 font-semibold text-warning-foreground">
                         Price confirm
                       </span>
                     )}
@@ -376,29 +459,34 @@ function BuyerShopPage() {
                 </div>
               </div>
 
-              <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
-                <Select
-                  value={selectedUnit}
-                  onValueChange={(value) => handleUnitChange(product, value as UnitType)}
-                >
-                  <SelectTrigger className="h-10 min-w-0">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {unitOptions.map((option) => (
-                      <SelectItem key={option.unit} value={option.unit}>
-                        {formatUnits(option.unit)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              <div className="mt-4 grid grid-cols-1 items-center gap-2 min-[430px]:grid-cols-[minmax(0,150px)_auto]">
+                <div className="flex h-11 items-center gap-2 rounded-md border border-border bg-background px-3 shadow-sm">
+                  <span className="text-xs font-semibold uppercase text-muted-foreground">
+                    Unit
+                  </span>
+                  <Select
+                    value={selectedUnit}
+                    onValueChange={(value) => handleUnitChange(product, value as UnitType)}
+                  >
+                    <SelectTrigger className="h-9 min-w-0 flex-1 border-0 bg-transparent px-0 shadow-none focus:ring-0">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {unitOptions.map((option) => (
+                        <SelectItem key={option.unit} value={option.unit}>
+                          {formatUnits(option.unit)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
 
-                <div className="flex items-center rounded-md border border-border">
+                <div className="flex h-11 items-center justify-between rounded-md border border-border bg-background shadow-sm">
                   <Button
                     type="button"
                     variant="ghost"
                     size="icon"
-                    className="h-10 w-10"
+                    className="h-11 w-12 rounded-r-none text-muted-foreground hover:text-foreground"
                     onClick={() =>
                       selectedUnit && setCartQuantity(product, selectedUnit, quantity - 1)
                     }
@@ -407,12 +495,12 @@ function BuyerShopPage() {
                   >
                     <Minus className="h-4 w-4" />
                   </Button>
-                  <div className="w-9 text-center text-base font-semibold">{quantity}</div>
+                  <div className="w-12 text-center text-lg font-bold tabular-nums">{quantity}</div>
                   <Button
                     type="button"
                     variant="ghost"
                     size="icon"
-                    className="h-10 w-10"
+                    className="h-11 w-12 rounded-l-none text-foreground hover:text-primary"
                     onClick={() =>
                       selectedUnit && setCartQuantity(product, selectedUnit, quantity + 1)
                     }

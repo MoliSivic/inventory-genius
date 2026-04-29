@@ -10,13 +10,25 @@ export const Route = createFileRoute("/buyer/debt")({
 function BuyerDebtPage() {
   const { state, currentBuyer } = useStore();
   const customerId = currentBuyer?.customerId;
+  const buyerOrderBySaleId = new Map(
+    state.buyerOrders.filter((order) => order.saleId).map((order) => [order.saleId, order]),
+  );
   const invoices = state.sales
-    .filter((sale) => sale.customerId === customerId)
+    .filter((sale) => {
+      if (sale.customerId !== customerId) return false;
+      const linkedOrder = buyerOrderBySaleId.get(sale.id);
+      return !linkedOrder || linkedOrder.buyerId === currentBuyer?.id;
+    })
     .sort((left, right) => right.date.localeCompare(left.date));
   const debtInvoices = invoices.filter((sale) => sale.total - sale.paidAmount > 0.005);
   const totalDebt = debtInvoices.reduce((sum, sale) => sum + sale.total - sale.paidAmount, 0);
+  const visibleSaleIds = new Set(invoices.map((sale) => sale.id));
   const payments = state.payments
-    .filter((payment) => payment.customerId === customerId)
+    .filter(
+      (payment) =>
+        payment.customerId === customerId &&
+        (!payment.saleId || visibleSaleIds.has(payment.saleId)),
+    )
     .sort((left, right) => right.date.localeCompare(left.date))
     .slice(0, 8);
 
@@ -25,7 +37,7 @@ function BuyerDebtPage() {
       <div className="mb-3 sm:mb-6">
         <h1 className="text-xl font-bold tracking-tight sm:text-2xl">Debt</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Balance from unpaid and partial invoices
+          Only unpaid and partial receipts are listed here. Paid receipts stay in Invoices.
         </p>
       </div>
 

@@ -8,7 +8,6 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { LEGACY_SAMPLE_PRODUCT_IDS, seedData } from "./mock-data";
 import type {
   AppState,
   BuyerAccount,
@@ -46,6 +45,7 @@ import {
   canSyncRemoteState,
   loadRemoteState,
   saveRemoteState,
+  subscribeRemoteAuthState,
   subscribeRemoteState,
 } from "./remote-state";
 
@@ -53,36 +53,6 @@ const STORAGE_KEY = "wms_state_v1";
 const BUYER_SESSION_STORAGE_KEY = "inventory_genius_buyer_session_id";
 const FALLBACK_CATEGORY_NAME = "ផ្សេងៗ";
 const FALLBACK_MARKET_NAME = "ផ្សេងៗ";
-const LEGACY_SAMPLE_PRODUCT_ID_SET = new Set<string>(LEGACY_SAMPLE_PRODUCT_IDS);
-const THANG_SOR_DOM_SIZE_PRODUCTS = [
-  "ថង់សរដុំ 6 x 11 ឃ្លោក",
-  "ថង់សរដុំ 6 x 14 ឃ្លោក",
-  "ថង់សរដុំ 8 x 15 ឃ្លោក",
-  "ថង់សរដុំ 9 x 18 ឃ្លោក",
-  "ថង់សរដុំ 12 x 20 ឃ្លោក",
-] as const;
-const THANG_KHMAO_DOM_SIZE_PRODUCTS = [
-  "ថង់ខ្មៅដុំ 5 x 9 ឃ្លោក",
-  "ថង់ខ្មៅដុំ 6 x 11 ឃ្លោក",
-  "ថង់ខ្មៅដុំ 6 x 14 ឃ្លោក",
-  "ថង់ខ្មៅដុំ 8 x 15 ឃ្លោក",
-  "ថង់ខ្មៅដុំ 9 x 18 ឃ្លោក",
-  "ថង់ខ្មៅដុំ 12 x 20 ឃ្លោក",
-] as const;
-const THANG_PORN_LOR_SIZE_PRODUCTS = [
-  "ថង់ពណ៌ 6 x 11 ល្អ",
-  "ថង់ពណ៌ 6 x 14 ល្អ",
-  "ថង់ពណ៌ 8 x 15 ល្អ",
-  "ថង់ពណ៌ 9 x 18 ល្អ",
-  "ថង់ពណ៌ 12 x 20 ល្អ",
-  "ថង់ពណ៌ 14 x 24 ល្អ",
-  "ថង់ពណ៌ 16 x 28 ល្អ",
-] as const;
-const PRESET_SIZE_GROUPS = [
-  { idPrefix: "preset_thang_sor_dom", names: THANG_SOR_DOM_SIZE_PRODUCTS },
-  { idPrefix: "preset_thang_khmao_dom", names: THANG_KHMAO_DOM_SIZE_PRODUCTS },
-  { idPrefix: "preset_thang_porn_lor", names: THANG_PORN_LOR_SIZE_PRODUCTS },
-] as const;
 const BUYER_ORDER_STATUSES = new Set<BuyerOrderStatus>([
   "pending",
   "confirmed",
@@ -91,6 +61,24 @@ const BUYER_ORDER_STATUSES = new Set<BuyerOrderStatus>([
   "cancelled",
 ]);
 const PAYMENT_STATUSES = new Set<PaymentStatus>(["paid", "unpaid", "partial"]);
+
+const emptyState: AppState = {
+  shopName: "Inventory Genius",
+  shopEmail: undefined,
+  shopTelegram: undefined,
+  categories: [],
+  markets: [],
+  products: [],
+  factories: [],
+  customers: [],
+  buyerAccounts: [],
+  buyerOrders: [],
+  buyerSessionId: undefined,
+  stockIns: [],
+  sales: [],
+  customerPrices: [],
+  payments: [],
+};
 
 type StoreResult = { ok: true } | { ok: false; error: string };
 
@@ -572,6 +560,22 @@ function normalizeBuyerOrders(orders: BuyerOrder[]) {
     .filter((order) => order.id && order.buyerId && order.customerId && order.items.length > 0);
 }
 
+function mirrorBuyerOrdersFromSales(orders: BuyerOrder[], sales: Sale[]) {
+  const saleById = new Map(sales.map((sale) => [sale.id, sale]));
+
+  return orders.map((order) => {
+    const sale = order.saleId ? saleById.get(order.saleId) : undefined;
+    if (!sale) return order;
+
+    return {
+      ...order,
+      totalEstimate: sale.total,
+      paidAmount: sale.paidAmount,
+      paymentStatus: sale.paymentStatus,
+    };
+  });
+}
+
 function findSuggestedPrice(
   state: Pick<AppState, "customerPrices" | "sales">,
   customerId: string,
@@ -769,181 +773,19 @@ function remapCustomerPriceProductIds(prices: CustomerPrice[], idRemap: Map<stri
   }));
 }
 
-function buildPresetProductId(idPrefix: string, name: string) {
-  const sizeKey =
-    name
-      .match(/(\d+\s*x\s*\d+)/i)?.[1]
-      ?.replace(/\s+/g, "")
-      .toLocaleLowerCase() ?? "item";
-  return `${idPrefix}_${sizeKey}`;
-}
-
-function expandPresetSizeProducts(products: Product[]) {
-  let result = products;
-
-  for (const group of PRESET_SIZE_GROUPS) {
-    const matchingProducts = result.filter((product) =>
-      group.names.some((name) => productNameKey(product.name) === productNameKey(name)),
-    );
-
-    if (matchingProducts.length === 0) continue;
-
-    const template = matchingProducts[0];
-    const existingNames = new Set(result.map((product) => productNameKey(product.name)));
-    const missingProducts = group.names
-      .filter((name) => !existingNames.has(productNameKey(name)))
-      .map((name) => {
-        const id = buildPresetProductId(group.idPrefix, name);
-        return {
-          ...template,
-          id,
-          name,
-          variants: template.variants.map((variant, index) => ({
-            ...variant,
-            id: `${id}_variant_${index + 1}`,
-          })),
-        };
-      });
-
-    if (missingProducts.length > 0) {
-      result = [...result, ...missingProducts];
-    }
-  }
-
-  return result;
-}
-
-function pruneLegacySampleData(state: AppState): AppState {
-  const removedProductIds = new Set(
-    state.products
-      .filter((product) => LEGACY_SAMPLE_PRODUCT_ID_SET.has(product.id))
-      .map((product) => product.id),
-  );
-
-  if (removedProductIds.size === 0) return state;
-
-  const products = state.products.filter((product) => !removedProductIds.has(product.id));
-  const stockIns = state.stockIns
-    .map((invoice) => {
-      const items = invoice.items.filter((item) => !removedProductIds.has(item.productId));
-      return {
-        ...invoice,
-        items,
-        total: Number(
-          items.reduce((sum, item) => sum + item.quantity * item.buyPrice, 0).toFixed(4),
-        ),
-      };
-    })
-    .filter((invoice) => invoice.items.length > 0);
-
-  const removedSaleIds = new Set<string>();
-  const sales = state.sales
-    .map((sale) => {
-      const items = sale.items.filter((item) => !removedProductIds.has(item.productId));
-      if (items.length === 0) {
-        removedSaleIds.add(sale.id);
-        return null;
-      }
-
-      const total = Number(
-        items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0).toFixed(4),
-      );
-      const estimatedProfit = Number(
-        items
-          .reduce((sum, item) => sum + item.quantity * (item.unitPrice - item.avgCostAtSale), 0)
-          .toFixed(4),
-      );
-      const paidAmount = Number(Math.min(sale.paidAmount, total).toFixed(4));
-      const paymentStatus = paidAmount <= 0 ? "unpaid" : paidAmount >= total ? "paid" : "partial";
-
-      return { ...sale, items, total, estimatedProfit, paidAmount, paymentStatus };
-    })
-    .filter((sale): sale is Sale => sale !== null);
-
-  return {
-    ...state,
-    products,
-    stockIns,
-    sales,
-    customerPrices: state.customerPrices.filter((price) => !removedProductIds.has(price.productId)),
-    payments: state.payments.filter((payment) => !removedSaleIds.has(payment.saleId ?? "")),
-  };
-}
-
-function isUninitializedProduct(product: Product) {
-  const hasLayers = Array.isArray(product.costLayers) && product.costLayers.length > 0;
-  return !hasLayers && product.stock <= 0.0001 && product.totalCostBasis <= 0.0001;
-}
-
-function applySeedPresetProducts(products: Product[]) {
-  const seedById = new Map(seedData.products.map((product) => [product.id, product]));
-  const replaced = products.map((product) => {
-    const seedProduct = seedById.get(product.id);
-    if (!seedProduct) return product;
-    return isUninitializedProduct(product) ? { ...seedProduct } : product;
-  });
-  const existingIds = new Set(replaced.map((product) => product.id));
-  const additions = seedData.products
-    .filter((seedProduct) => !existingIds.has(seedProduct.id))
-    .map((seedProduct) => ({ ...seedProduct }));
-  return additions.length > 0 ? [...replaced, ...additions] : replaced;
-}
-
-function mergeMissingSeedStockIns(stockIns: StockInInvoice[]) {
-  const existingIds = new Set(stockIns.map((invoice) => invoice.id));
-  const existingInvoiceNumbers = new Set(
-    stockIns.map((invoice) => invoice.invoiceNumber.trim().toLocaleLowerCase()),
-  );
-  const missing = seedData.stockIns.filter(
-    (invoice) =>
-      !existingIds.has(invoice.id) &&
-      !existingInvoiceNumbers.has(invoice.invoiceNumber.trim().toLocaleLowerCase()),
-  );
-  return missing.length > 0 ? [...stockIns, ...missing] : stockIns;
-}
-
-function mergeMissingSeedFactories(factories: Factory[]) {
-  const existingIds = new Set(factories.map((factory) => factory.id));
-  const missing = seedData.factories.filter((factory) => !existingIds.has(factory.id));
-  return missing.length > 0 ? [...factories, ...missing] : factories;
-}
-
-function mergeMissingSeedBuyerCustomers(customers: Customer[]) {
-  const seedBuyerCustomerIds = new Set(
-    seedData.buyerAccounts.map((buyerAccount) => buyerAccount.customerId),
-  );
-  const existingIds = new Set(customers.map((customer) => customer.id));
-  const missing = seedData.customers.filter(
-    (customer) => seedBuyerCustomerIds.has(customer.id) && !existingIds.has(customer.id),
-  );
-  return missing.length > 0 ? [...customers, ...missing] : customers;
-}
-
-function mergeMissingSeedBuyerAccounts(buyerAccounts: BuyerAccount[]) {
-  const existingEmails = new Set(buyerAccounts.map((buyerAccount) => buyerAccount.email));
-  const missing = seedData.buyerAccounts.filter(
-    (buyerAccount) => !existingEmails.has(buyerAccount.email),
-  );
-  return missing.length > 0 ? [...buyerAccounts, ...missing] : buyerAccounts;
-}
-
 function normalizeAppState(state: AppState): AppState {
-  const prunedState = pruneLegacySampleData(state);
-  const customers = normalizeCustomers(mergeMissingSeedBuyerCustomers(prunedState.customers));
-  const buyerAccounts = normalizeBuyerAccounts(
-    mergeMissingSeedBuyerAccounts(prunedState.buyerAccounts ?? []),
+  const customers = normalizeCustomers(state.customers ?? []);
+  const buyerAccounts = normalizeBuyerAccounts(state.buyerAccounts ?? []);
+  const buyerOrders = normalizeBuyerOrders(state.buyerOrders ?? []);
+  const factories = state.factories ?? [];
+  const { products: dedupedProducts, idRemap } = dedupeProductsByName(
+    normalizeProducts(state.products ?? []),
   );
-  const buyerOrders = normalizeBuyerOrders(prunedState.buyerOrders ?? []);
-  const factories = mergeMissingSeedFactories(prunedState.factories);
-  const mergedProducts = expandPresetSizeProducts(
-    normalizeProducts(applySeedPresetProducts(prunedState.products)),
-  );
-  const { products: dedupedProducts, idRemap } = dedupeProductsByName(mergedProducts);
-  const remappedStockIns = remapStockInProductIds(prunedState.stockIns, idRemap);
-  const remappedSales = remapSaleProductIds(prunedState.sales, idRemap);
-  const remappedCustomerPrices = remapCustomerPriceProductIds(prunedState.customerPrices, idRemap);
+  const remappedStockIns = remapStockInProductIds(state.stockIns ?? [], idRemap);
+  const remappedSales = remapSaleProductIds(state.sales ?? [], idRemap);
+  const remappedCustomerPrices = remapCustomerPriceProductIds(state.customerPrices ?? [], idRemap);
   const baseProductIds = new Set(dedupedProducts.map((product) => product.id));
-  const stockIns = mergeMissingSeedStockIns(remappedStockIns).filter((invoice) =>
+  const stockIns = remappedStockIns.filter((invoice) =>
     invoice.items.every((item) => baseProductIds.has(item.productId)),
   );
   const recalculatedInventory = buildOpeningInventoryLayers(
@@ -955,58 +797,24 @@ function normalizeAppState(state: AppState): AppState {
   const sales = recalculatedInventory.ok ? recalculatedInventory.sales : remappedSales;
 
   return {
-    ...prunedState,
+    ...emptyState,
+    ...state,
     customers,
     buyerAccounts,
-    buyerOrders,
+    buyerOrders: mirrorBuyerOrdersFromSales(buyerOrders, sales),
     buyerSessionId: undefined,
     factories,
-    markets: normalizeMarkets(prunedState.markets, [...customers, ...buyerAccounts]),
+    markets: normalizeMarkets(state.markets, [...customers, ...buyerAccounts]),
     products,
     stockIns,
     sales,
     customerPrices: remappedCustomerPrices,
-    categories: normalizeCategories(prunedState.categories, products),
+    categories: normalizeCategories(state.categories, products),
   };
-}
-
-function hydrateState(raw: unknown): AppState {
-  if (!raw || typeof raw !== "object") return seedData;
-
-  const parsed = raw as Partial<AppState> & {
-    categories?: Array<ProductCategory | string>;
-    markets?: string[];
-  };
-  const customers = Array.isArray(parsed.customers)
-    ? normalizeCustomers(parsed.customers as Customer[])
-    : seedData.customers;
-  const products = Array.isArray(parsed.products)
-    ? normalizeProducts(parsed.products as Product[])
-    : seedData.products;
-
-  const nextState = {
-    ...seedData,
-    ...parsed,
-    customers,
-    products,
-    markets: normalizeMarkets(parsed.markets, customers),
-    categories: Array.isArray(parsed.categories)
-      ? normalizeCategories(parsed.categories, products)
-      : normalizeCategories(seedData.categories, products, { includeDefaults: true }),
-  };
-
-  return normalizeAppState(nextState);
 }
 
 function loadState(): AppState {
-  if (typeof window === "undefined") return seedData;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return seedData;
-    return hydrateState(JSON.parse(raw));
-  } catch {
-    return seedData;
-  }
+  return emptyState;
 }
 
 function uid(prefix: string) {
@@ -1165,11 +973,11 @@ interface StoreContextValue {
 const StoreContext = createContext<StoreContextValue | null>(null);
 
 export function StoreProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<AppState>(seedData);
+  const [state, setState] = useState<AppState>(emptyState);
   const [buyerSessionId, setBuyerSessionId] = useState<string | undefined>(loadBuyerSessionId);
   const [hydrated, setHydrated] = useState(false);
   const applyingRemoteStateRef = useRef(false);
-  const latestSerializedStateRef = useRef(JSON.stringify(seedData));
+  const latestSerializedStateRef = useRef(JSON.stringify(emptyState));
   const lastSavedRemoteStateRef = useRef("");
 
   useEffect(() => {
@@ -1185,25 +993,32 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       };
     }
 
-    void loadRemoteState(localState)
-      .then((remoteState) => {
-        if (cancelled) return;
+    const load = () =>
+      loadRemoteState(localState)
+        .then((remoteState) => {
+          if (cancelled) return;
 
-        const normalizedState = normalizeAppState(remoteState);
-        const serializedState = JSON.stringify(normalizedState);
-        applyingRemoteStateRef.current = true;
-        latestSerializedStateRef.current = serializedState;
-        lastSavedRemoteStateRef.current = serializedState;
-        setState(normalizedState);
-        setHydrated(true);
-      })
-      .catch((error) => {
-        console.error("Failed to load Supabase app state. Falling back to local state.", error);
-        if (!cancelled) setHydrated(true);
-      });
+          const normalizedState = normalizeAppState(remoteState);
+          const serializedState = JSON.stringify(normalizedState);
+          applyingRemoteStateRef.current = true;
+          latestSerializedStateRef.current = serializedState;
+          lastSavedRemoteStateRef.current = serializedState;
+          setState(normalizedState);
+          setHydrated(true);
+        })
+        .catch((error) => {
+          console.error("Failed to load Supabase app state. Falling back to local state.", error);
+          if (!cancelled) setHydrated(true);
+        });
+
+    void load();
+    const unsubscribeAuth = subscribeRemoteAuthState(() => {
+      void load();
+    });
 
     return () => {
       cancelled = true;
+      unsubscribeAuth();
     };
   }, []);
 
@@ -1282,7 +1097,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [hydrated, state]);
 
   const reset = useCallback(() => {
-    setState(seedData);
+    setState(emptyState);
     try {
       localStorage.removeItem(STORAGE_KEY);
     } catch {
@@ -1633,6 +1448,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       ok: false,
       error: "Unknown error",
     };
+    let createdBuyer: BuyerAccount | undefined;
 
     setState((s) => {
       const email = normalizeEmail(data.email);
@@ -1695,6 +1511,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       };
 
       result = { ok: true, buyer };
+      createdBuyer = buyer;
 
       return {
         ...s,
@@ -1704,7 +1521,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       };
     });
 
-    if (result.ok) setBuyerSessionId(result.buyer.id);
+    if (createdBuyer) setBuyerSessionId(createdBuyer.id);
 
     return result;
   }, []);
@@ -1980,6 +1797,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 status,
                 sellerNote: sellerNote?.trim() || order.sellerNote,
                 saleId: saleId ?? order.saleId,
+                ...(saleId
+                  ? (() => {
+                      const sale = s.sales.find((candidate) => candidate.id === saleId);
+                      return sale
+                        ? {
+                            totalEstimate: sale.total,
+                            paidAmount: sale.paidAmount,
+                            paymentStatus: sale.paymentStatus,
+                          }
+                        : {};
+                    })()
+                  : {}),
                 updatedAt: todayIsoString(),
               }
             : order,
@@ -2002,18 +1831,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const linkedSale = order.saleId
             ? s.sales.find((sale) => sale.id === order.saleId)
             : undefined;
-          const total = Number(Math.max(linkedSale?.total ?? order.totalEstimate, 0).toFixed(2));
+          if (!linkedSale) return order;
+
+          const total = Number(Math.max(linkedSale.total, 0).toFixed(2));
           const nextPaid =
             paymentStatus === "paid"
               ? total
               : paymentStatus === "unpaid"
                 ? 0
-                : Math.min(Math.max(paidAmount ?? order.paidAmount ?? 0, 0), total);
-          const nextPaymentStatus =
-            nextPaid <= 0 ? "unpaid" : nextPaid >= total ? "paid" : paymentStatus;
+                : Math.min(Math.max(paidAmount ?? linkedSale.paidAmount ?? 0, 0), total);
+          const nextPaymentStatus = paymentStatusFromPaid(total, nextPaid);
           const normalizedPaidAmount = Number(nextPaid.toFixed(2));
 
-          linkedSaleId = order.saleId;
+          linkedSaleId = linkedSale.id;
           linkedPaidAmount = normalizedPaidAmount;
           linkedPaymentStatus = nextPaymentStatus;
 
@@ -2026,18 +1856,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           };
         });
 
-        const sales =
-          linkedSaleId && linkedPaymentStatus && linkedPaidAmount !== undefined
-            ? s.sales.map((sale) =>
-                sale.id === linkedSaleId
-                  ? {
-                      ...sale,
-                      paymentStatus: linkedPaymentStatus,
-                      paidAmount: linkedPaidAmount,
-                    }
-                  : sale,
-              )
-            : s.sales;
+        let sales = s.sales;
+        if (linkedSaleId && linkedPaymentStatus && linkedPaidAmount !== undefined) {
+          const saleId = linkedSaleId;
+          const nextPaymentStatus = linkedPaymentStatus;
+          const nextPaidAmount = linkedPaidAmount;
+
+          sales = s.sales.map((sale) =>
+            sale.id === saleId
+              ? {
+                  ...sale,
+                  paymentStatus: nextPaymentStatus,
+                  paidAmount: nextPaidAmount,
+                }
+              : sale,
+          );
+        }
 
         return { ...s, buyerOrders, sales };
       });
@@ -2297,7 +2131,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      const nextSales = s.sales.map((sale) => {
+      const nextSales: Sale[] = s.sales.map((sale) => {
         if (sale.id !== saleId) return sale;
 
         return {
@@ -2319,7 +2153,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           paidAmount: Number(Math.max(data.paidAmount, 0).toFixed(2)),
           paymentStatus: data.paymentStatus,
           notes: data.notes,
-          telegramStatus: "not_sent",
+          telegramStatus: "not_sent" as const,
         };
       });
 
@@ -2408,9 +2242,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         sales = s.sales.map((sale) => {
           if (sale.id !== p.saleId) return sale;
           const newPaid = sale.paidAmount + p.amount;
-          const status: Sale["paymentStatus"] =
-            newPaid >= sale.total ? "paid" : newPaid > 0 ? "partial" : "unpaid";
-          return { ...sale, paidAmount: Math.min(newPaid, sale.total), paymentStatus: status };
+          const paidAmount = Math.min(newPaid, sale.total);
+          return {
+            ...sale,
+            paidAmount,
+            paymentStatus: paymentStatusFromPaid(sale.total, paidAmount),
+          };
         });
       }
 
@@ -2583,6 +2420,41 @@ export function buyerVisiblePrice(
   unit?: SaleItem["unit"],
 ): BuyerVisiblePrice | undefined {
   return findBuyerVisiblePrice(state, customerId, productId, unit);
+}
+
+export function paymentStatusFromPaid(total: number, paidAmount: number): PaymentStatus {
+  const normalizedTotal = Number(Math.max(total ?? 0, 0).toFixed(2));
+  const normalizedPaid = Number(Math.min(Math.max(paidAmount ?? 0, 0), normalizedTotal).toFixed(2));
+
+  if (normalizedPaid <= 0) return "unpaid";
+  if (normalizedTotal > 0 && normalizedPaid >= normalizedTotal) return "paid";
+  return "partial";
+}
+
+export function getBuyerOrderReceipt(
+  state: Pick<AppState, "sales">,
+  order: Pick<BuyerOrder, "saleId">,
+) {
+  return order.saleId ? state.sales.find((sale) => sale.id === order.saleId) : undefined;
+}
+
+export function getBuyerOrderDisplayTotals(state: Pick<AppState, "sales">, order: BuyerOrder) {
+  const receipt = getBuyerOrderReceipt(state, order);
+  const total = Number(Math.max(receipt?.total ?? order.totalEstimate ?? 0, 0).toFixed(2));
+  const paidAmount = Number(
+    Math.min(Math.max(receipt?.paidAmount ?? order.paidAmount ?? 0, 0), total).toFixed(2),
+  );
+  const paymentStatus = receipt ? paymentStatusFromPaid(total, paidAmount) : order.paymentStatus;
+  const remaining = Number(Math.max(total - paidAmount, 0).toFixed(2));
+
+  return {
+    receipt,
+    total,
+    paidAmount,
+    remaining,
+    paymentStatus,
+    hasReceipt: Boolean(receipt),
+  };
 }
 
 export function fmtMoney(n: number) {

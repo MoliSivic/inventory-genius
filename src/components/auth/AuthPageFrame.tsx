@@ -28,8 +28,8 @@ export function AuthPageFrame({ title, description, children, footer }: AuthPage
           </CardHeader>
           <CardContent className="space-y-4">
             {!isSupabaseAuthEnabled && (
-              <Alert>
-                <AlertTitle>Mock Mode Active</AlertTitle>
+              <Alert variant="destructive">
+                <AlertTitle>Supabase Auth Required</AlertTitle>
                 <AlertDescription>{SUPABASE_AUTH_DISABLED_MESSAGE}</AlertDescription>
               </Alert>
             )}

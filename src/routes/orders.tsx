@@ -30,7 +30,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { PageHeader, PageSection } from "@/components/app/StatCard";
-import { fmtMoney, useStore } from "@/lib/store";
+import { fmtMoney, getBuyerOrderDisplayTotals, useStore } from "@/lib/store";
 import type { BuyerOrder, BuyerOrderStatus, PaymentStatus } from "@/lib/types";
 import { primaryUnit } from "@/lib/units";
 import { cn, displayZeroAsPlaceholder, parseNumericInput } from "@/lib/utils";
@@ -54,7 +54,7 @@ const weekWindowLabels: Record<WeekWindow, string> = {
 const statusLabels: Record<BuyerOrderStatus, string> = {
   pending: "Pending",
   confirmed: "Confirmed",
-  packing: "Packing",
+  packing: "Packing/Loading",
   completed: "Completed",
   cancelled: "Cancelled",
 };
@@ -152,6 +152,17 @@ function OrdersPage() {
   }, [market, orderMarkets, search, state.buyerAccounts, state.buyerOrders, state.customers]);
 
   const pendingCount = state.buyerOrders.filter((order) => order.status === "pending").length;
+  const orderControlCount = state.buyerOrders.filter(
+    (order) => !order.saleId && routeStatuses.has(order.status),
+  ).length;
+  const activeControlOrders = useMemo(
+    () => orders.filter((order) => !order.saleId && routeStatuses.has(order.status)),
+    [orders],
+  );
+  const completedReceiptOrders = useMemo(
+    () => orders.filter((order) => order.saleId && order.status === "completed"),
+    [orders],
+  );
   const loadableOrders = useMemo(
     () =>
       state.buyerOrders.filter(
@@ -427,21 +438,6 @@ function OrdersPage() {
       return;
     }
 
-    const paidAmount =
-      order.paymentStatus === "paid"
-        ? order.totalEstimate
-        : order.paymentStatus === "partial"
-          ? order.paidAmount
-          : 0;
-    const clampedPaidAmount = Number(
-      Math.min(Math.max(paidAmount, 0), order.totalEstimate).toFixed(2),
-    );
-    const paymentStatus: PaymentStatus =
-      clampedPaidAmount <= 0
-        ? "unpaid"
-        : clampedPaidAmount >= order.totalEstimate
-          ? "paid"
-          : "partial";
     const sale = addSale({
       customerId: order.customerId,
       date: new Date().toISOString().slice(0, 10),
@@ -451,8 +447,8 @@ function OrdersPage() {
         unit: item.unit,
         unitPrice: item.estimatedUnitPrice ?? 0,
       })),
-      paidAmount: clampedPaidAmount,
-      paymentStatus,
+      paidAmount: 0,
+      paymentStatus: "unpaid",
       notes: [order.orderNumber, order.notes].filter(Boolean).join(" - "),
     });
 
@@ -461,7 +457,12 @@ function OrdersPage() {
       return;
     }
 
-    updateBuyerOrderStatus(order.id, "completed", `Converted to ${sale.receiptNumber}`, sale.id);
+    updateBuyerOrderStatus(
+      order.id,
+      "completed",
+      `Loaded manually. Receipt ${sale.receiptNumber} created.`,
+      sale.id,
+    );
     toast.success(`${sale.receiptNumber} created from ${order.orderNumber}.`);
   };
 
@@ -488,7 +489,7 @@ function OrdersPage() {
               className="h-10 px-4"
               onClick={() => setView("control")}
             >
-              Order Control ({pendingCount})
+              Order Control ({orderControlCount})
             </Button>
             <div className="rounded-md bg-primary/15 px-3 py-2 text-sm font-semibold text-primary">
               {loadableCount} to load
@@ -773,14 +774,6 @@ function OrdersPage() {
                           <Badge className={cn("border-transparent", statusClasses[order.status])}>
                             {statusLabels[order.status]}
                           </Badge>
-                          <Badge
-                            className={cn(
-                              "border-transparent",
-                              paymentClasses[order.paymentStatus],
-                            )}
-                          >
-                            {paymentLabels[order.paymentStatus]}
-                          </Badge>
                         </div>
                         <p className="mt-1 text-sm text-muted-foreground">
                           {buyer?.name ?? customer?.name ?? "Buyer"} -{" "}
@@ -861,7 +854,7 @@ function OrdersPage() {
           </div>
 
           <div className="space-y-3">
-            {orders.map((order) => (
+            {activeControlOrders.map((order) => (
               <OrderCard
                 key={order.id}
                 order={order}
@@ -873,9 +866,38 @@ function OrdersPage() {
               />
             ))}
 
-            {orders.length === 0 && (
+            {activeControlOrders.length === 0 && (
               <div className="rounded-md border border-border p-8 text-center text-sm text-muted-foreground">
-                No buyer orders found.
+                No active buyer orders need confirmation or loading.
+              </div>
+            )}
+
+            {completedReceiptOrders.length > 0 && (
+              <div className="pt-3">
+                <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                  <div>
+                    <h3 className="text-base font-semibold">Completed receipts</h3>
+                    <p className="text-xs text-muted-foreground">
+                      Receipt-backed orders. Record physical cash after delivery here.
+                    </p>
+                  </div>
+                  <span className="text-xs font-medium text-muted-foreground">
+                    {completedReceiptOrders.length} completed
+                  </span>
+                </div>
+                <div className="space-y-3">
+                  {completedReceiptOrders.map((order) => (
+                    <OrderCard
+                      key={order.id}
+                      order={order}
+                      onCompleteSale={completeOrderAsSale}
+                      onPaymentChange={(nextStatus, paidAmount) =>
+                        updateBuyerOrderPayment(order.id, nextStatus, paidAmount)
+                      }
+                      onStatusChange={(nextStatus) => updateBuyerOrderStatus(order.id, nextStatus)}
+                    />
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -903,16 +925,17 @@ function OrderCard({
   const [partialAmount, setPartialAmount] = useState(0);
   const buyer = state.buyerAccounts.find((account) => account.id === order.buyerId);
   const customer = state.customers.find((item) => item.id === order.customerId);
-  const receipt = order.saleId ? state.sales.find((sale) => sale.id === order.saleId) : undefined;
-  const total = receipt?.total ?? order.totalEstimate;
-  const paidAmount = receipt?.paidAmount ?? order.paidAmount;
-  const paymentSelectValue = partialEditorOpen ? "partial" : order.paymentStatus;
+  const { receipt, total, paidAmount, remaining, paymentStatus } = getBuyerOrderDisplayTotals(
+    state,
+    order,
+  );
+  const hasReceipt = Boolean(receipt);
+  const paymentSelectValue = partialEditorOpen ? "partial" : paymentStatus;
   const canConfirm = order.status === "pending";
   const canPack = order.status === "confirmed";
   const canComplete = order.status === "packing";
   const canCancel = order.status !== "completed" && order.status !== "cancelled";
-  const canRecordPayment = order.status === "completed" && Boolean(receipt) && total > paidAmount;
-  const remaining = Math.max(total - paidAmount, 0);
+  const canRecordPayment = order.status === "completed" && hasReceipt && remaining > 0;
 
   const openPaymentDialog = () => {
     setPaymentAmount(Number(remaining.toFixed(2)));
@@ -979,9 +1002,15 @@ function OrderCard({
             <Badge className={cn("border-transparent", statusClasses[order.status])}>
               {statusLabels[order.status]}
             </Badge>
-            <Badge className={cn("border-transparent", paymentClasses[order.paymentStatus])}>
-              {paymentLabels[order.paymentStatus]}
-            </Badge>
+            {hasReceipt ? (
+              <Badge className={cn("border-transparent", paymentClasses[paymentStatus])}>
+                {paymentLabels[paymentStatus]}
+              </Badge>
+            ) : (
+              <Badge className="border-transparent bg-muted text-muted-foreground">
+                Payment after receipt
+              </Badge>
+            )}
           </div>
           {receipt && (
             <p className="mt-1 text-xs font-medium text-primary">
@@ -1003,7 +1032,9 @@ function OrderCard({
               ? "Waiting for loading confirmation. It can be included in a market truck route."
               : routeStatuses.has(order.status)
                 ? "Active for loading route."
-                : "Closed order."}
+                : hasReceipt
+                  ? "Receipt created. Record physical payment after delivery."
+                  : "Closed order."}
           </p>
         </div>
 
@@ -1015,40 +1046,52 @@ function OrderCard({
                 Record Payment
               </Button>
             )}
-            <Select
-              value={paymentSelectValue}
-              onValueChange={(value) => handlePaymentSelect(value as PaymentStatus)}
-            >
-              <SelectTrigger className="h-9 w-32">
-                <WalletCards className="h-4 w-4" />
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="unpaid">Unpaid</SelectItem>
-                <SelectItem value="partial">Partial</SelectItem>
-                <SelectItem value="paid">Paid</SelectItem>
-              </SelectContent>
-            </Select>
-            {(partialEditorOpen || order.paymentStatus === "partial") && (
-              <div className="flex h-9 items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-2">
-                <Label
-                  htmlFor={`partial-paid-${order.id}`}
-                  className="whitespace-nowrap text-xs font-semibold text-primary"
+            {hasReceipt ? (
+              <>
+                <Select
+                  value={paymentSelectValue}
+                  onValueChange={(value) => handlePaymentSelect(value as PaymentStatus)}
                 >
-                  Paid
-                </Label>
-                <Input
-                  id={`partial-paid-${order.id}`}
-                  type="number"
-                  min={0}
-                  max={total}
-                  step="0.01"
-                  value={displayZeroAsPlaceholder(partialEditorOpen ? partialAmount : paidAmount)}
-                  placeholder="0"
-                  onChange={(event) => updatePartialAmount(parseNumericInput(event.target.value))}
-                  className="h-7 w-24 border-0 bg-transparent p-0 text-right shadow-none focus-visible:ring-0"
-                  aria-label="Paid amount"
-                />
+                  <SelectTrigger className="h-9 w-32">
+                    <WalletCards className="h-4 w-4" />
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="unpaid">Unpaid</SelectItem>
+                    <SelectItem value="partial">Partial</SelectItem>
+                    <SelectItem value="paid">Paid</SelectItem>
+                  </SelectContent>
+                </Select>
+                {(partialEditorOpen || paymentStatus === "partial") && (
+                  <div className="flex h-9 items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-2">
+                    <Label
+                      htmlFor={`partial-paid-${order.id}`}
+                      className="whitespace-nowrap text-xs font-semibold text-primary"
+                    >
+                      Paid
+                    </Label>
+                    <Input
+                      id={`partial-paid-${order.id}`}
+                      type="number"
+                      min={0}
+                      max={total}
+                      step="0.01"
+                      value={displayZeroAsPlaceholder(
+                        partialEditorOpen ? partialAmount : paidAmount,
+                      )}
+                      placeholder="0"
+                      onChange={(event) =>
+                        updatePartialAmount(parseNumericInput(event.target.value))
+                      }
+                      className="h-7 w-24 border-0 bg-transparent p-0 text-right shadow-none focus-visible:ring-0"
+                      aria-label="Paid amount"
+                    />
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="rounded-md bg-muted px-3 py-2 text-xs font-medium text-muted-foreground">
+                Create receipt before payment
               </div>
             )}
           </div>

@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { PackageCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { fmtMoney, useStore } from "@/lib/store";
+import { fmtMoney, getBuyerOrderDisplayTotals, useStore } from "@/lib/store";
 import type { BuyerOrderStatus, PaymentStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -12,7 +12,7 @@ export const Route = createFileRoute("/buyer/orders")({
 const statusLabels: Record<BuyerOrderStatus, string> = {
   pending: "Sent",
   confirmed: "Confirmed",
-  packing: "Packing",
+  packing: "Loading",
   completed: "Completed",
   cancelled: "Cancelled",
 };
@@ -26,10 +26,10 @@ const statusClasses: Record<BuyerOrderStatus, string> = {
 };
 
 const statusDescriptions: Record<BuyerOrderStatus, string> = {
-  pending: "Waiting for seller confirmation.",
-  confirmed: "Confirmed and ready for truck loading.",
-  packing: "Being packed for delivery.",
-  completed: "Converted to sale receipt.",
+  pending: "Sent to the seller.",
+  confirmed: "Seller confirmed it for loading.",
+  packing: "Being loaded for delivery.",
+  completed: "Loaded and receipt created.",
   cancelled: "Cancelled by the seller.",
 };
 
@@ -60,10 +60,8 @@ function BuyerOrdersPage() {
 
       <div className="space-y-3">
         {orders.map((order) => {
-          const remaining = Math.max(order.totalEstimate - order.paidAmount, 0);
-          const receipt = order.saleId
-            ? state.sales.find((sale) => sale.id === order.saleId)
-            : null;
+          const { receipt, total, paidAmount, remaining, paymentStatus } =
+            getBuyerOrderDisplayTotals(state, order);
 
           return (
             <article
@@ -77,11 +75,11 @@ function BuyerOrdersPage() {
                     <Badge className={cn("border-transparent", statusClasses[order.status])}>
                       {statusLabels[order.status]}
                     </Badge>
-                    <Badge
-                      className={cn("border-transparent", paymentClasses[order.paymentStatus])}
-                    >
-                      {paymentLabels[order.paymentStatus]}
-                    </Badge>
+                    {receipt && (
+                      <Badge className={cn("border-transparent", paymentClasses[paymentStatus])}>
+                        {paymentLabels[paymentStatus]}
+                      </Badge>
+                    )}
                   </div>
                   <p className="mt-2 text-xs text-muted-foreground">
                     {new Date(order.date).toLocaleString()}
@@ -90,13 +88,14 @@ function BuyerOrdersPage() {
                     {statusDescriptions[order.status]}
                   </p>
                   {receipt && (
-                    <p className="mt-1 text-xs font-medium text-success">
-                      Receipt created: {receipt.receiptNumber}
-                    </p>
+                    <div className="mt-2 rounded-md bg-success/10 px-3 py-2 text-xs text-success">
+                      <p className="font-semibold">Receipt: {receipt.receiptNumber}</p>
+                      <p>Invoices and Debt use this receipt as the money record.</p>
+                    </div>
                   )}
                 </div>
                 <div className="rounded-md bg-muted px-3 py-2 text-sm font-semibold">
-                  {order.totalEstimate > 0 ? fmtMoney(order.totalEstimate) : "Price confirm"}
+                  {total > 0 ? fmtMoney(total) : "Price confirm"}
                 </div>
               </div>
 
@@ -147,8 +146,8 @@ function BuyerOrdersPage() {
               </div>
 
               <div className="mt-3 grid gap-2 rounded-md bg-muted p-3 text-sm sm:grid-cols-3">
-                <MoneyCell label="Total" value={order.totalEstimate} />
-                <MoneyCell label="Paid" value={order.paidAmount} />
+                <MoneyCell label={receipt ? "Receipt total" : "Order estimate"} value={total} />
+                <MoneyCell label="Paid" value={paidAmount} />
                 <MoneyCell label="Remaining" value={remaining} danger={remaining > 0} />
               </div>
 

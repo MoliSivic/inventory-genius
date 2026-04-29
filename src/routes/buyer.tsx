@@ -97,7 +97,7 @@ function BuyerLayout() {
     }
 
     if (normalizedAuthEmail && (!currentBuyer || isDifferentCustomer)) {
-      const result = signInBuyerByEmail(authEmail, authName);
+      const result = signInBuyerByEmail(normalizedAuthEmail, authName);
 
       if (result.ok) return;
 
@@ -143,13 +143,20 @@ function BuyerLayout() {
     (order) => order.status !== "completed" && order.status !== "cancelled",
   ).length;
   const buyerInvoices = state.sales.filter((sale) => sale.customerId === currentBuyer?.customerId);
-  const activeInvoiceCount = buyerInvoices.filter((sale) => !sale.archivedAt).length;
-  const debtInvoiceCount = buyerInvoices.filter(
+  const buyerOrderBySaleId = new Map(
+    state.buyerOrders.filter((order) => order.saleId).map((order) => [order.saleId, order]),
+  );
+  const visibleBuyerInvoices = buyerInvoices.filter((sale) => {
+    const linkedOrder = buyerOrderBySaleId.get(sale.id);
+    return !linkedOrder || linkedOrder.buyerId === currentBuyer?.id;
+  });
+  const activeInvoiceCount = visibleBuyerInvoices.filter((sale) => !sale.archivedAt).length;
+  const debtInvoiceCount = visibleBuyerInvoices.filter(
     (sale) => sale.total - sale.paidAmount > 0.005,
   ).length;
   const navItems = [
-    { to: "/buyer/shop", label: "Order", icon: ShoppingBag, badge: 0 },
-    { to: "/buyer/orders", label: "Orders", icon: PackageCheck, badge: openOrderCount },
+    { to: "/buyer/shop", label: "New Order", icon: ShoppingBag, badge: 0 },
+    { to: "/buyer/orders", label: "Order History", icon: PackageCheck, badge: openOrderCount },
     { to: "/buyer/invoices", label: "Invoices", icon: ReceiptText, badge: activeInvoiceCount },
     { to: "/buyer/debt", label: "Debt", icon: WalletCards, badge: debtInvoiceCount },
     { to: "/buyer/settings", label: "Settings", icon: Settings, badge: 0 },
@@ -216,7 +223,7 @@ function BuyerLayout() {
                                 className={cn(
                                   "flex h-10 items-center gap-3 rounded-md px-3 text-sm font-medium transition-colors",
                                   active
-                                    ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm"
+                                    ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm ring-1 ring-sidebar-primary-foreground/15"
                                     : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
                                 )}
                               >
@@ -291,10 +298,10 @@ function BuyerLayout() {
                       key={item.to}
                       to={item.to}
                       className={cn(
-                        "flex h-9 items-center gap-2 rounded-md px-3 text-sm font-medium",
+                        "flex h-9 items-center gap-2 rounded-md px-3 text-sm font-medium transition-colors",
                         active
-                          ? "bg-muted text-foreground"
-                          : "text-muted-foreground hover:text-foreground",
+                          ? "bg-primary/10 text-primary ring-1 ring-primary/20"
+                          : "text-muted-foreground hover:bg-muted/70 hover:text-foreground",
                       )}
                     >
                       <Icon className="h-4 w-4" />

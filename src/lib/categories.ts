@@ -87,8 +87,12 @@ export function sameCategoryName(a: string, b: string) {
   return categoryKey(a) === categoryKey(b);
 }
 
+function isKhmerConsonant(char: string): char is (typeof KHMER_CONSONANTS)[number] {
+  return KHMER_CONSONANT_ORDER.has(char as (typeof KHMER_CONSONANTS)[number]);
+}
+
 function extractKhmerConsonants(value: string) {
-  return Array.from(value).filter((char) => KHMER_CONSONANT_ORDER.has(char));
+  return Array.from(value).filter(isKhmerConsonant);
 }
 
 export function compareCategoryNames(a: string, b: string) {

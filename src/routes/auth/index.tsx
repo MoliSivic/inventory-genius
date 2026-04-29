@@ -11,25 +11,19 @@ import {
   getSupabaseClient,
   getSupabaseUserProfile,
   getSupabaseUnavailableMessage,
-  isMockAuthEnabled,
   isSupabaseReady,
-  MOCK_AUTH_DEMO_EMAIL,
-  MOCK_AUTH_DEMO_PASSWORD,
-  signInWithMockCredentials,
 } from "@/lib/supabase";
-import { useStore } from "@/lib/store";
 
 export const Route = createFileRoute("/auth/")({ component: SignInPage });
 
 function SignInPage() {
   const navigate = Route.useNavigate();
-  const { signInBuyer } = useStore();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const canSignIn = isSupabaseReady || isMockAuthEnabled;
+  const canSignIn = isSupabaseReady;
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -38,29 +32,6 @@ function SignInPage() {
 
     if (normalizedEmail.endsWith(".dom")) {
       setErrorMessage('Please check your email address. Did you mean ".com" instead of ".dom"?');
-      return;
-    }
-
-    if (isMockAuthEnabled) {
-      const buyerResult = signInBuyer(normalizedEmail, password);
-
-      if (buyerResult.ok) {
-        toast.success("Signed in as customer.");
-        await navigate({ to: "/buyer/shop" });
-        return;
-      }
-
-      const result = signInWithMockCredentials(normalizedEmail, password);
-
-      if (!result.ok) {
-        setErrorMessage(
-          "Invalid credentials. Use admin@gmail.com / admin123 for seller, or customer@gmail.com / customer123 for customer.",
-        );
-        return;
-      }
-
-      toast.success("Signed in with mock admin account.");
-      await navigate({ to: "/" });
       return;
     }
 
@@ -107,35 +78,17 @@ function SignInPage() {
       title="Sign In"
       description="Sign in with your email and password to continue."
       footer={
-        isMockAuthEnabled ? (
-          <p className="pt-2 text-center text-sm text-muted-foreground">
-            Mock mode is active for local testing.
-          </p>
-        ) : (
-          <p className="pt-2 text-center text-sm text-muted-foreground">
-            Need an account?{" "}
-            <Link
-              to="/auth/sign-up"
-              className="font-medium text-primary underline-offset-4 hover:underline"
-            >
-              Create one
-            </Link>
-          </p>
-        )
+        <p className="pt-2 text-center text-sm text-muted-foreground">
+          Need an account?{" "}
+          <Link
+            to="/auth/sign-up"
+            className="font-medium text-primary underline-offset-4 hover:underline"
+          >
+            Create one
+          </Link>
+        </p>
       }
     >
-      {isMockAuthEnabled && (
-        <Alert>
-          <AlertTitle>Mock Credentials</AlertTitle>
-          <AlertDescription className="space-y-1">
-            <p>
-              Seller: {MOCK_AUTH_DEMO_EMAIL} | Password: {MOCK_AUTH_DEMO_PASSWORD}
-            </p>
-            <p>Customer: customer@gmail.com | Password: customer123</p>
-          </AlertDescription>
-        </Alert>
-      )}
-
       {errorMessage && (
         <Alert variant="destructive">
           <AlertTitle>Sign-in Failed</AlertTitle>
@@ -188,22 +141,20 @@ function SignInPage() {
         </Button>
       </form>
 
-      {!isMockAuthEnabled && (
-        <div className="flex items-center justify-between text-sm">
-          <Link
-            to="/auth/forgot-password"
-            className="text-muted-foreground underline-offset-4 hover:underline"
-          >
-            Forgot password?
-          </Link>
-          <Link
-            to="/auth/sign-up"
-            className="font-medium text-primary underline-offset-4 hover:underline"
-          >
-            Sign up
-          </Link>
-        </div>
-      )}
+      <div className="flex items-center justify-between text-sm">
+        <Link
+          to="/auth/forgot-password"
+          className="text-muted-foreground underline-offset-4 hover:underline"
+        >
+          Forgot password?
+        </Link>
+        <Link
+          to="/auth/sign-up"
+          className="font-medium text-primary underline-offset-4 hover:underline"
+        >
+          Sign up
+        </Link>
+      </div>
     </AuthPageFrame>
   );
 }

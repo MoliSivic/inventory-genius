@@ -23,13 +23,9 @@ import { useStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import {
   type AppRole,
-  getMockAuthUser,
   getSupabaseClient,
   getSupabaseUserProfile,
   getSupabaseUnavailableMessage,
-  isMockAuthEnabled,
-  MOCK_AUTH_STATE_CHANGED_EVENT,
-  signOutMockAuth,
   isSupabaseReady,
 } from "@/lib/supabase";
 import { toast } from "sonner";
@@ -159,27 +155,6 @@ export function AppLayout({ children }: { children: ReactNode }) {
       };
     }
 
-    if (isMockAuthEnabled) {
-      const syncMockEmail = () => {
-        const mockUser = getMockAuthUser();
-        const email = mockUser?.email ?? null;
-
-        setUserEmail(email);
-        setUserName(resolveDisplayName(mockUser?.name, email));
-        setUserRole(email ? "admin" : null);
-        setIsAuthResolved(true);
-      };
-
-      syncMockEmail();
-      window.addEventListener(MOCK_AUTH_STATE_CHANGED_EVENT, syncMockEmail);
-      window.addEventListener("storage", syncMockEmail);
-
-      return () => {
-        window.removeEventListener(MOCK_AUTH_STATE_CHANGED_EVENT, syncMockEmail);
-        window.removeEventListener("storage", syncMockEmail);
-      };
-    }
-
     setUserEmail(null);
     setUserName(null);
     setUserRole(null);
@@ -236,16 +211,6 @@ export function AppLayout({ children }: { children: ReactNode }) {
   ]);
 
   const handleSignOut = async () => {
-    if (isMockAuthEnabled) {
-      signOutMockAuth();
-      setUserEmail(null);
-      setUserName(null);
-      setUserRole(null);
-      toast.success("Logged out successfully.");
-      await navigate({ to: "/auth" });
-      return;
-    }
-
     if (!isSupabaseReady) {
       toast.error(getSupabaseUnavailableMessage());
       return;
@@ -378,7 +343,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
           ))}
         </nav>
         <div className="px-5 py-3 border-t border-sidebar-border text-xs text-sidebar-foreground/50">
-          v1.0 · Mock prototype
+          v1.0 · Supabase backend
         </div>
       </aside>
 
