@@ -138,12 +138,21 @@ function BuyerLayout() {
     await navigate({ to: "/auth" });
   };
 
+  const buyerOrders = state.buyerOrders.filter((order) => order.buyerId === currentBuyer?.id);
+  const openOrderCount = buyerOrders.filter(
+    (order) => order.status !== "completed" && order.status !== "cancelled",
+  ).length;
+  const buyerInvoices = state.sales.filter((sale) => sale.customerId === currentBuyer?.customerId);
+  const activeInvoiceCount = buyerInvoices.filter((sale) => !sale.archivedAt).length;
+  const debtInvoiceCount = buyerInvoices.filter(
+    (sale) => sale.total - sale.paidAmount > 0.005,
+  ).length;
   const navItems = [
-    { to: "/buyer/shop", label: "Order", icon: ShoppingBag },
-    { to: "/buyer/orders", label: "Orders", icon: PackageCheck },
-    { to: "/buyer/invoices", label: "Invoices", icon: ReceiptText },
-    { to: "/buyer/debt", label: "Debt", icon: WalletCards },
-    { to: "/buyer/settings", label: "Settings", icon: Settings },
+    { to: "/buyer/shop", label: "Order", icon: ShoppingBag, badge: 0 },
+    { to: "/buyer/orders", label: "Orders", icon: PackageCheck, badge: openOrderCount },
+    { to: "/buyer/invoices", label: "Invoices", icon: ReceiptText, badge: activeInvoiceCount },
+    { to: "/buyer/debt", label: "Debt", icon: WalletCards, badge: debtInvoiceCount },
+    { to: "/buyer/settings", label: "Settings", icon: Settings, badge: 0 },
   ];
 
   return (
@@ -212,7 +221,19 @@ function BuyerLayout() {
                                 )}
                               >
                                 <Icon className="h-4 w-4" />
-                                {item.label}
+                                <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                                {item.badge > 0 && (
+                                  <span
+                                    className={cn(
+                                      "ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 text-[11px] font-bold leading-none",
+                                      active
+                                        ? "bg-sidebar-primary-foreground/20 text-sidebar-primary-foreground ring-1 ring-sidebar-primary-foreground/25"
+                                        : "bg-warning/95 text-warning-foreground shadow-sm",
+                                    )}
+                                  >
+                                    {item.badge > 99 ? "99+" : item.badge}
+                                  </span>
+                                )}
                               </Link>
                             </SheetClose>
                           );
@@ -278,6 +299,18 @@ function BuyerLayout() {
                     >
                       <Icon className="h-4 w-4" />
                       {item.label}
+                      {item.badge > 0 && (
+                        <span
+                          className={cn(
+                            "flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-bold leading-none",
+                            active
+                              ? "bg-background text-foreground"
+                              : "bg-warning/95 text-warning-foreground",
+                          )}
+                        >
+                          {item.badge > 99 ? "99+" : item.badge}
+                        </span>
+                      )}
                     </Link>
                   );
                 })}

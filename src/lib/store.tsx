@@ -1104,7 +1104,12 @@ interface StoreContextValue {
     items: Array<{ productId: string; quantity: number; unit?: SaleItem["unit"] }>;
     notes?: string;
   }) => BuyerOrder | { error: string };
-  updateBuyerOrderStatus: (orderId: string, status: BuyerOrderStatus, sellerNote?: string) => void;
+  updateBuyerOrderStatus: (
+    orderId: string,
+    status: BuyerOrderStatus,
+    sellerNote?: string,
+    saleId?: string,
+  ) => void;
   updateBuyerOrderPayment: (
     orderId: string,
     paymentStatus: PaymentStatus,
@@ -1965,7 +1970,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const updateBuyerOrderStatus: StoreContextValue["updateBuyerOrderStatus"] = useCallback(
-    (orderId, status, sellerNote) => {
+    (orderId, status, sellerNote, saleId) => {
       setState((s) => ({
         ...s,
         buyerOrders: s.buyerOrders.map((order) =>
@@ -1974,6 +1979,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 ...order,
                 status,
                 sellerNote: sellerNote?.trim() || order.sellerNote,
+                saleId: saleId ?? order.saleId,
                 updatedAt: todayIsoString(),
               }
             : order,

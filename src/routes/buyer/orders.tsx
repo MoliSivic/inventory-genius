@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { PackageCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { fmtMoney, useStore } from "@/lib/store";
-import type { BuyerOrderStatus } from "@/lib/types";
+import type { BuyerOrderStatus, PaymentStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/buyer/orders")({
@@ -25,9 +25,31 @@ const statusClasses: Record<BuyerOrderStatus, string> = {
   cancelled: "bg-destructive/15 text-destructive",
 };
 
+const statusDescriptions: Record<BuyerOrderStatus, string> = {
+  pending: "Waiting for seller confirmation.",
+  confirmed: "Confirmed and ready for truck loading.",
+  packing: "Being packed for delivery.",
+  completed: "Converted to sale receipt.",
+  cancelled: "Cancelled by the seller.",
+};
+
+const paymentLabels: Record<PaymentStatus, string> = {
+  paid: "Paid",
+  partial: "Partial",
+  unpaid: "Unpaid",
+};
+
+const paymentClasses: Record<PaymentStatus, string> = {
+  paid: "bg-success/15 text-success",
+  partial: "bg-warning/20 text-warning-foreground",
+  unpaid: "bg-destructive/15 text-destructive",
+};
+
 function BuyerOrdersPage() {
   const { state, currentBuyer } = useStore();
-  const orders = state.buyerOrders.filter((order) => order.buyerId === currentBuyer?.id);
+  const orders = state.buyerOrders
+    .filter((order) => order.buyerId === currentBuyer?.id)
+    .sort((left, right) => right.date.localeCompare(left.date));
 
   return (
     <div className="mx-auto w-full max-w-7xl px-3 py-3 sm:px-6 sm:py-4 lg:px-8">
@@ -36,71 +58,143 @@ function BuyerOrdersPage() {
         <p className="mt-1 text-sm text-muted-foreground">{orders.length} orders</p>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        {orders.map((order) => (
-          <article
-            key={order.id}
-            className="rounded-md border border-border bg-card p-4 shadow-[var(--shadow-card)]"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="font-semibold">{order.orderNumber}</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {new Date(order.date).toLocaleDateString()}
-                </p>
-              </div>
-              <Badge className={cn("border-transparent", statusClasses[order.status])}>
-                {statusLabels[order.status]}
-              </Badge>
-            </div>
+      <div className="space-y-3">
+        {orders.map((order) => {
+          const remaining = Math.max(order.totalEstimate - order.paidAmount, 0);
+          const receipt = order.saleId
+            ? state.sales.find((sale) => sale.id === order.saleId)
+            : null;
 
-            <div className="mt-3 space-y-2">
-              {order.items.map((item) => {
-                const product = state.products.find((candidate) => candidate.id === item.productId);
-                return (
-                  <div
-                    key={`${order.id}-${item.productId}`}
-                    className="flex items-start justify-between gap-3 text-sm"
-                  >
-                    <div className="min-w-0">
-                      <p className="line-clamp-2 font-medium">{product?.name ?? "Product"}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {item.quantity} {item.unit}
-                      </p>
-                    </div>
-                    <p className="shrink-0 font-semibold">
-                      {item.estimatedUnitPrice === undefined
-                        ? "Confirm"
-                        : fmtMoney(item.estimatedUnitPrice * item.quantity)}
-                    </p>
+          return (
+            <article
+              key={order.id}
+              className="rounded-md border border-border bg-card p-4 shadow-[var(--shadow-card)]"
+            >
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="text-lg font-bold tracking-tight">{order.orderNumber}</h2>
+                    <Badge className={cn("border-transparent", statusClasses[order.status])}>
+                      {statusLabels[order.status]}
+                    </Badge>
+                    <Badge
+                      className={cn("border-transparent", paymentClasses[order.paymentStatus])}
+                    >
+                      {paymentLabels[order.paymentStatus]}
+                    </Badge>
                   </div>
-                );
-              })}
-            </div>
-
-            <div className="mt-3 border-t border-border pt-3 text-sm">
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Total</span>
-                <span className="font-bold">
-                  {order.totalEstimate > 0 ? fmtMoney(order.totalEstimate) : "Confirm"}
-                </span>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {new Date(order.date).toLocaleString()}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {statusDescriptions[order.status]}
+                  </p>
+                  {receipt && (
+                    <p className="mt-1 text-xs font-medium text-success">
+                      Receipt created: {receipt.receiptNumber}
+                    </p>
+                  )}
+                </div>
+                <div className="rounded-md bg-muted px-3 py-2 text-sm font-semibold">
+                  {order.totalEstimate > 0 ? fmtMoney(order.totalEstimate) : "Price confirm"}
+                </div>
               </div>
-              {order.sellerNote && (
-                <p className="mt-2 rounded-md bg-muted p-2 text-xs text-muted-foreground">
-                  {order.sellerNote}
-                </p>
+
+              <div className="mt-3 overflow-x-auto rounded-md border border-border">
+                <table className="w-full min-w-[560px] text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/40 text-left text-xs uppercase text-muted-foreground">
+                      <th className="px-3 py-2 font-medium">Product</th>
+                      <th className="px-3 py-2 text-right font-medium">Qty</th>
+                      <th className="px-3 py-2 text-right font-medium">Price</th>
+                      <th className="px-3 py-2 text-right font-medium">Subtotal</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {order.items.map((item, index) => {
+                      const product = state.products.find(
+                        (candidate) => candidate.id === item.productId,
+                      );
+                      return (
+                        <tr
+                          key={`${order.id}-${item.productId}-${index}`}
+                          className="border-b border-border/60"
+                        >
+                          <td className="px-3 py-2">
+                            <p className="font-medium">{product?.name ?? "Product"}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {product?.category ?? ""}
+                            </p>
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            {item.quantity} {item.unit}
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            {item.estimatedUnitPrice === undefined
+                              ? "Confirm"
+                              : fmtMoney(item.estimatedUnitPrice)}
+                          </td>
+                          <td className="px-3 py-2 text-right font-semibold">
+                            {item.estimatedUnitPrice === undefined
+                              ? "Confirm"
+                              : fmtMoney(item.estimatedUnitPrice * item.quantity)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="mt-3 grid gap-2 rounded-md bg-muted p-3 text-sm sm:grid-cols-3">
+                <MoneyCell label="Total" value={order.totalEstimate} />
+                <MoneyCell label="Paid" value={order.paidAmount} />
+                <MoneyCell label="Remaining" value={remaining} danger={remaining > 0} />
+              </div>
+
+              {(order.notes || order.sellerNote) && (
+                <div className="mt-3 space-y-2 text-xs text-muted-foreground">
+                  {order.notes && (
+                    <p className="rounded-md bg-muted/70 p-2">Your note: {order.notes}</p>
+                  )}
+                  {order.sellerNote && (
+                    <p className="rounded-md bg-muted/70 p-2">Seller note: {order.sellerNote}</p>
+                  )}
+                </div>
               )}
-            </div>
-          </article>
-        ))}
+            </article>
+          );
+        })}
 
         {orders.length === 0 && (
-          <div className="rounded-md border border-border bg-card p-8 text-center lg:col-span-2">
+          <div className="rounded-md border border-border bg-card p-8 text-center">
             <PackageCheck className="mx-auto h-9 w-9 text-muted-foreground" />
             <p className="mt-3 text-sm font-medium">No orders yet</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Orders you send from the product page will appear here.
+            </p>
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function MoneyCell({
+  label,
+  value,
+  danger = false,
+}: {
+  label: string;
+  value: number;
+  danger?: boolean;
+}) {
+  return (
+    <div className="min-w-0">
+      <p className="truncate text-xs text-muted-foreground">{label}</p>
+      <p className={cn("mt-1 truncate font-bold", danger && "text-destructive")}>
+        {fmtMoney(value)}
+      </p>
     </div>
   );
 }

@@ -305,7 +305,7 @@ function OrdersPage() {
       return;
     }
 
-    updateBuyerOrderStatus(order.id, "completed", `Converted to ${sale.receiptNumber}`);
+    updateBuyerOrderStatus(order.id, "completed", `Converted to ${sale.receiptNumber}`, sale.id);
     toast.success(`${sale.receiptNumber} created from ${order.orderNumber}.`);
   };
 
